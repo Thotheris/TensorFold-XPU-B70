@@ -383,8 +383,8 @@ install_system() {
     printf 'OK system downloads use %s (remove manually after inspection)\n' "$temp"
     while IFS='|' read -r package version url digest; do
         installed="$(package_version "$package")" || installed=""
-        if [[ "$package" == libze1 ]] && version_ge "${installed:-0}" 1.32.0; then
-            printf 'OK libze1 %s >= 1.32.0, left unchanged\n' "$installed"
+        if [[ "$package" == libze1 || "$package" == libze-dev ]] && version_ge "${installed:-0}" 1.32.0; then
+            printf 'OK %s %s >= 1.32.0, left unchanged\n' "$package" "$installed"
             continue
         fi
         if [[ "$installed" == "$version" ]]; then
@@ -394,8 +394,8 @@ install_system() {
         if [[ -n "$installed" ]] && version_ge "$installed" "$version"; then
             printf 'WARN explicit --system downgrade: %s %s -> %s\n' "$package" "$installed" "$version"
         fi
-        if [[ "$package" == libze1 && "$distro" == 26.04 ]]; then
-            printf 'WARN no u26.04 libze1 deb; installing the 1.32.0+u24.04 pin\n'
+        if [[ "$package" == libze1 || "$package" == libze-dev ]] && [[ "$distro" == 26.04 ]]; then
+            printf 'WARN no u26.04 %s deb; installing the 1.32.0+u24.04 pin\n' "$package"
         fi
         file="$temp/${url##*/}"
         run_cmd curl --fail --location --proto '=https' --tlsv1.2 --output "$file" "$url" || return 1
@@ -406,6 +406,7 @@ libigdgmm12|22.10.0|https://github.com/intel/compute-runtime/releases/download/2
 intel-igc-core-2|2.40.13+22418|https://github.com/intel/intel-graphics-compiler/releases/download/v2.40.13/intel-igc-core-2_2.40.13+22418_amd64.deb|ebd795e9fddf303a9b24b7f04545d8ddd9ad1f85b3d0cb1166476fab24da6d44
 intel-igc-opencl-2|2.40.13+22418|https://github.com/intel/intel-graphics-compiler/releases/download/v2.40.13/intel-igc-opencl-2_2.40.13+22418_amd64.deb|4f990874efc11c3f6091a663b08aef576c4af592dcd8f12e116f8c2fc92d34d9
 libze1|1.32.0+u24.04|https://github.com/oneapi-src/level-zero/releases/download/v1.32.0/libze1_1.32.0+u24.04_amd64.deb|3c846af24f84a89150f6a4c6adcb4ea4ebef74dc119fe44f4e269bfaa72c7ba6
+libze-dev|1.32.0+u24.04|https://github.com/oneapi-src/level-zero/releases/download/v1.32.0/libze-dev_1.32.0+u24.04_amd64.deb|4b783ed5fb937a55a7a0f3a8bc66af252f362e82476ebc0304da36173c9f2eb8
 libze-intel-gpu1|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/libze-intel-gpu1_26.31.39395.13-0_amd64.deb|1722943f81b576b9bb8d61016464208f48ce533dc3bf24ad39605293115cc289
 intel-opencl-icd|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-opencl-icd_26.31.39395.13-0_amd64.deb|5a9c9e8fdca8a2f9e22754b1a4618c7babf21d7c3ab3503c680005007c7a8c44
 intel-ocloc|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-ocloc_26.31.39395.13-0_amd64.deb|12c5e61ed1dca5cbf38494e280abf88100a451580d57c44f601a17d9727e465e

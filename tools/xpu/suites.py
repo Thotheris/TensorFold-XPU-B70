@@ -125,11 +125,8 @@ def _env_probes(hooks: dict[str, Any] | None = None) -> tuple[str, str, dict[str
     def allocate(nbytes: int) -> Any:
         if not device_ok:
             raise RuntimeError("XPU is unavailable for the host RAM shadow probe")
-        query = getattr(torch.xpu, "mem_get_info", None)
-        if query is not None:
-            free, _total = query()
-            if int(free) < nbytes + 1024**3:
-                raise MemoryError(f"XPU free {int(free)} bytes, refusing a {nbytes}-byte tensor")
+        # mem_get_info().free is not a budget on this B70: it reported about 112 MiB free
+        # while a 2 GiB allocation still succeeded, and the GPU may already be in use.
         token = torch.empty(nbytes, dtype=torch.uint8, device="xpu")
         torch.xpu.synchronize()
         return token

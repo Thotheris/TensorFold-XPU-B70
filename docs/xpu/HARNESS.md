@@ -66,7 +66,9 @@ The pins are compute-runtime 26.31.39395.13, IGC 2.40.13 (build 22418), libigdgm
 `intel-ocloc` 26.31.39395.13, and Level Zero loader >= 1.32.0. Ubuntu 26.04's archive
 copies (compute-runtime 26.05, IGC 1.0.17791, `libze1` 1.28.2) are too old. There is no
 `+u26.04` loader deb. Bootstrap installs `libze1_1.32.0+u24.04` when the installed loader
-is below 1.32.0, on both 24.04 and 26.04. An already newer loader is left alone. Those
+is below 1.32.0, on both 24.04 and 26.04, and installs matching `libze-dev` headers.
+Triton needs `level_zero/ze_api.h` from that package. An already newer loader is left
+alone. Those
 debs, including the IGC packages labeled Ubuntu 24.04, unpacked on the 26.04 test box.
 `dpkg` errors stop the step. There is no automatic `apt-get -f` repair.
 
@@ -274,13 +276,25 @@ The runner purges its Triton cache when the toolchain hash or any `TRITON_INTEL_
 `IGC_*` environment value changes. These knobs are not reliably part of Triton's cache
 key. Keep DLE out of runtime PATH and use a separate shell for native builds.
 
+## Confirmed on 5950x-server
+
+The venv is `~/.local/share/tensorfold-xpu/venv` (Python 3.14). It has
+`torch==2.14.1+xpu` and `triton-xpu==3.8.0`. `torch.version.xpu` is `20260100`.
+`torch.xpu` sees Intel Arc Pro B70. Both
+`has_subgroup_matrix_multiply_accumulate` and `has_subgroup_2d_block_io` are true,
+so `ocloc` is visible. A 128-element int32 Triton add matched. `data_ptr()` was
+above 2^63. Triton failed to compile until `libze-dev` 1.32.0 supplied
+`level_zero/ze_api.h`. `xpu-smi` is not installed.
+
+Do not treat the host-RAM deltas as an idle shadow result. The GPU was already in
+use. `mem_get_info()` reported about 112 MiB free while a 2 GiB allocation still
+succeeded. A later 2 GiB step, then another 2 GiB, moved `MemAvailable` by about
+-1.1 GiB and then -1.7 GiB, and `Committed_AS` by about +2.7 GiB and then +2.0 GiB.
+
 ## Not yet confirmed on this box
 
-- The exact `torch==2.14.1+xpu` wheel and its bundled Triton distribution name.
 - DLE offline installer support for `--install-dir`, and the script's SHA256 (none is published here).
-- Whether installing `ocloc` makes both DPAS and 2D-block device flags True.
-- Whether host RAM shadows XPU allocations, measured by the `env` host-RAM-shadow probe.
+- A host-RAM shadow measurement taken while the GPU is idle.
 - Swapfile creation and activation on the box's filesystem.
 - The systemd user timer and results push using the box's configured Git access.
 - Exact `bmg_guc*` and `bmg_huc*` firmware filenames.
-- `xpu-smi discovery` text on Arc; no `diag` subcommand is assumed.
