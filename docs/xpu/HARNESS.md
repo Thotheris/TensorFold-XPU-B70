@@ -63,13 +63,12 @@ replaced only in this explicitly requested mode, with a warning before a downgra
 Temporary installers remain available for inspection, including on failure.
 
 The pins are compute-runtime 26.31.39395.13, IGC 2.40.13 (build 22418), libigdgmm12 22.10.0,
-`intel-ocloc` 26.31.39395.13, and Level Zero loader >= 1.32.0. On Ubuntu 24.04, an older
-or missing loader is replaced by the release's `libze1_1.32.0+u24.04_amd64.deb`.
-An already newer loader is preserved. There is no u26.04 loader deb in that release.
-On Ubuntu 26.04, an older or missing loader stops the system step rather than installing
-the u24.04 deb. Obtain a compatible >= 1.32.0 loader and rerun. IGC's Ubuntu 24.04
-binary compatibility on 26.04 is still to be verified on the box; dpkg errors stop
-installation without an automatic dependency repair.
+`intel-ocloc` 26.31.39395.13, and Level Zero loader >= 1.32.0. Ubuntu 26.04's archive
+copies (compute-runtime 26.05, IGC 1.0.17791, `libze1` 1.28.2) are too old. There is no
+`+u26.04` loader deb. Bootstrap installs `libze1_1.32.0+u24.04` when the installed loader
+is below 1.32.0, on both 24.04 and 26.04. An already newer loader is left alone. Those
+debs, including the IGC packages labeled Ubuntu 24.04, unpacked on the 26.04 test box.
+`dpkg` errors stop the step. There is no automatic `apt-get -f` repair.
 
 DLE 2026.1 is installed from Intel's 2026.1.2.25 offline installer into
 `/opt/intel/dle-2026.1`, or an absolute `--dle-prefix` outside `/opt/intel/oneapi`.
@@ -87,8 +86,10 @@ binary torch wheels. That mixture causes Triton SIGSEGV. Native builds later use
 separate subshell such as `bash -lc 'source <prefix>/compiler/<version>/env/vars.sh; ...'`.
 `build_ext.sh` is separate work. Bootstrap does not source any vars script or edit profiles.
 
-The running kernel must be >= 6.17 with `xe` bound to the B70. Firmware should match
-`bmg_guc*` and `bmg_huc*` in `/lib/firmware/xe`; exact filenames are not yet confirmed.
+The running kernel must be >= 6.17 with `xe` bound to the B70. The test box
+`5950x-server` runs `7.0.0-34-generic`. The operator confirmed ReBAR and Above 4G
+Decoding in the BIOS. Firmware should match `bmg_guc*` and `bmg_huc*` in
+`/lib/firmware/xe`; exact filenames are not yet confirmed.
 ReBAR should expose about 32G in Region 2 or the largest 64-bit prefetchable BAR, not 256M.
 Fix firmware, driver binding and BIOS settings manually. Kernel changes require:
 
@@ -281,7 +282,5 @@ key. Keep DLE out of runtime PATH and use a separate shell for native builds.
 - Whether host RAM shadows XPU allocations, measured by the `env` host-RAM-shadow probe.
 - Swapfile creation and activation on the box's filesystem.
 - The systemd user timer and results push using the box's configured Git access.
-- Ubuntu 26.04 versus 24.04 compatibility for the IGC debs and the `libze1` loader.
 - Exact `bmg_guc*` and `bmg_huc*` firmware filenames.
-- ReBAR sysfs layout and the B70's readable BAR sizes.
 - `xpu-smi discovery` text on Arc; no `diag` subcommand is assumed.

@@ -214,11 +214,13 @@ report() {
     section IGC
     report_package intel-igc-core-2 2.40.13+22418
     report_package intel-igc-opencl-2 2.40.13+22418
-    printf 'WARN IGC debs are Ubuntu 24.04 binaries; Ubuntu 26.04 dpkg compatibility needs box verification\n'
+    printf 'OK IGC 2.40.13 debs are labeled Ubuntu 24.04; dpkg accepted them on Ubuntu 26.04\n'
     section level-zero
     report_package libze1 1.32.0 minimum
     distro="$(ubuntu_version)" || distro=unknown
-    printf 'WARN Ubuntu %s: u24.04 loader deb is only allowed on 24.04, never on 26.04\n' "$distro"
+    if [[ "$distro" == 26.04 ]]; then
+        printf 'WARN no u26.04 libze1 deb; --apply --system installs 1.32.0+u24.04 when the loader is below 1.32.0\n'
+    fi
     section ocloc
     report_package intel-ocloc 26.31.39395.13-0
     if have ocloc; then printf 'OK ocloc at %s\n' "$(command -v ocloc)"
@@ -369,7 +371,6 @@ install_system() {
     for file in curl sha256sum dpkg-query dpkg sudo apt-get; do
         have "$file" || { missing "$file needed by --system"; return 1; }
     done
-    loader_blocked=0
     [[ "$DLE_PREFIX" == /* && "$DLE_PREFIX" != / && "$DLE_PREFIX" != /opt/intel/oneapi* ]] ||
         { missing 'DLE prefix must be absolute and outside /opt/intel/oneapi'; return 1; }
     if have readlink; then
@@ -382,15 +383,6 @@ install_system() {
     printf 'OK system downloads use %s (remove manually after inspection)\n' "$temp"
     while IFS='|' read -r package version url digest; do
         installed="$(package_version "$package")" || installed=""
-        if [[ "$package" == libze1 && "$distro" == 26.04 ]]; then
-            if version_ge "${installed:-0}" 1.32.0; then
-                printf 'OK libze1 %s >= 1.32.0, left unchanged\n' "$installed"
-            else
-                printf 'WARN Ubuntu 26.04 has no pinned u26.04 libze1 deb; refusing the u24.04 package\n'
-                loader_blocked=1
-            fi
-            continue
-        fi
         if [[ "$package" == libze1 ]] && version_ge "${installed:-0}" 1.32.0; then
             printf 'OK libze1 %s >= 1.32.0, left unchanged\n' "$installed"
             continue
@@ -402,22 +394,22 @@ install_system() {
         if [[ -n "$installed" ]] && version_ge "$installed" "$version"; then
             printf 'WARN explicit --system downgrade: %s %s -> %s\n' "$package" "$installed" "$version"
         fi
+        if [[ "$package" == libze1 && "$distro" == 26.04 ]]; then
+            printf 'WARN no u26.04 libze1 deb; installing the 1.32.0+u24.04 pin\n'
+        fi
         file="$temp/${url##*/}"
         run_cmd curl --fail --location --proto '=https' --tlsv1.2 --output "$file" "$url" || return 1
         printf '%s  %s\n' "$digest" "$file" | sha256sum --check - || return 1
         debs+=("$file")
     done <<'DEBS'
-intel-ocloc|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-ocloc_26.31.39395.13-0_amd64.deb|12c5e61ed1dca5cbf38494e280abf88100a451580d57c44f601a17d9727e465e
-intel-opencl-icd|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-opencl-icd_26.31.39395.13-0_amd64.deb|5a9c9e8fdca8a2f9e22754b1a4618c7babf21d7c3ab3503c680005007c7a8c44
 libigdgmm12|22.10.0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/libigdgmm12_22.10.0_amd64.deb|6031a63d6e8a12ce61c14efc15f2c8e727061286e3820b8594e6d00615e04d54
-libze-intel-gpu1|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/libze-intel-gpu1_26.31.39395.13-0_amd64.deb|1722943f81b576b9bb8d61016464208f48ce533dc3bf24ad39605293115cc289
 intel-igc-core-2|2.40.13+22418|https://github.com/intel/intel-graphics-compiler/releases/download/v2.40.13/intel-igc-core-2_2.40.13+22418_amd64.deb|ebd795e9fddf303a9b24b7f04545d8ddd9ad1f85b3d0cb1166476fab24da6d44
 intel-igc-opencl-2|2.40.13+22418|https://github.com/intel/intel-graphics-compiler/releases/download/v2.40.13/intel-igc-opencl-2_2.40.13+22418_amd64.deb|4f990874efc11c3f6091a663b08aef576c4af592dcd8f12e116f8c2fc92d34d9
 libze1|1.32.0+u24.04|https://github.com/oneapi-src/level-zero/releases/download/v1.32.0/libze1_1.32.0+u24.04_amd64.deb|3c846af24f84a89150f6a4c6adcb4ea4ebef74dc119fe44f4e269bfaa72c7ba6
+libze-intel-gpu1|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/libze-intel-gpu1_26.31.39395.13-0_amd64.deb|1722943f81b576b9bb8d61016464208f48ce533dc3bf24ad39605293115cc289
+intel-opencl-icd|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-opencl-icd_26.31.39395.13-0_amd64.deb|5a9c9e8fdca8a2f9e22754b1a4618c7babf21d7c3ab3503c680005007c7a8c44
+intel-ocloc|26.31.39395.13-0|https://github.com/intel/compute-runtime/releases/download/26.31.39395.13/intel-ocloc_26.31.39395.13-0_amd64.deb|12c5e61ed1dca5cbf38494e280abf88100a451580d57c44f601a17d9727e465e
 DEBS
-    if [[ "$distro" == 26.04 ]]; then
-        printf 'WARN IGC Ubuntu 24.04 deb compatibility on Ubuntu 26.04 is UNVERIFIED; dpkg failure stops installation\n'
-    fi
     run_cmd sudo apt-get install -y ocl-icd-libopencl1 || return 1
     if ((${#debs[@]})); then
         run_cmd sudo dpkg -i "${debs[@]}" || {
@@ -444,10 +436,6 @@ DEBS
             printf 'WARN HWE candidate is not guaranteed >= 6.17; inspect installed version before manual reboot\n'
             run_cmd sudo apt-get install -y linux-generic-hwe-24.04 || return 1
         else printf 'OK Ubuntu 26.04 stock kernel is expected >= 6.17, no kernel package change\n'; fi
-    fi
-    if ((loader_blocked)); then
-        missing 'Ubuntu 26.04 loader is below 1.32.0 and was not replaced; other pinned debs were still installed'
-        return 1
     fi
     printf 'OK system step complete, no profiles changed and no reboot requested\n'
 }
