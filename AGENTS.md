@@ -177,7 +177,10 @@ Each role owns paths. Change only files your role owns. If you need a change els
 - `xpu/<ws>/<topic>`: your work branch, cut from `xpu/main` (e.g. `xpu/k1/gdn-triton`, `xpu/infra/accel`). One topic
   per branch; keep it small.
 - `results`: an orphan branch of result bundles. Never merge it anywhere.
-- `upstream` remote: `ashhart/TensorFold`. Upstream merges are the Integrator's job and go forward only.
+- `upstream` remote: `ashhart/TensorFold`. **Fetch only. Never push, open PRs or file issues there** unless the repo
+  owner explicitly says the work is ready. In every clone, disable it with
+  `git remote set-url --push upstream DISABLED-do-not-push-to-upstream`. All pushes go to `origin`
+  (`Thotheris/TensorFold-XPU-B70`). Upstream merges into this fork are the Integrator's job and go forward only.
 
 **To get a hardware run**, commit `.b70/run.yml` on your branch and push:
 ```yaml
