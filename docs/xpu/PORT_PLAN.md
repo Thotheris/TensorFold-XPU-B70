@@ -222,7 +222,11 @@ load.
      Base Toolkit, no IPEX).
    - A venv with `torch==2.14.*` from the XPU index plus its bundled triton. Never let `pip` replace them: install with
      `--no-deps` and keep a `constraints.txt`.
-   - Checks: ReBAR enabled, host RAM ≥ 64 GB, `xpu-smi discovery`.
+   - Checks: ReBAR enabled, `xpu-smi discovery`.
+   - Host RAM: the box has **32 GB**. **Warn** below 64 GB rather than fail, and offer to create a 32 GB swap file
+     (`--apply`).
+   - `env` suite probe `host_ram_shadow`: allocate 4/8/16 GB on XPU; record the `MemAvailable` and `Committed_AS`
+     deltas in `env.json`.
    - Model cache: `tensorfold pull` (or `hf download`) for `devan-carlin/Qwen3.8-27B-int4-AutoRound`,
      `RedHatAI/Qwen3.8-27B-INT4`, `letechlead/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-INT4-AutoRound`,
      `SergiioB/Nemotron-3.5-Lightning-30B-A3B-GPTQ-INT4-G64-sym` and `z-lab/Qwen3.8-27B-DFlash2`. Record each one's
@@ -582,7 +586,11 @@ needs about 19 GB. Admission
 
 **Pitfalls.**
 - **Single allocations > 4 GB fail** even with `UR_L0_ENABLE_RELAXED_ALLOCATION_LIMITS=1`. Audit the loaders: no tensor ≥ 4 GB. The largest expected is the 27B head at about 0.65 GB packed, but check any concatenated or flattened staging buffers in `direct_read`/`weights`.
-- Host RAM shadows XPU allocations (torch 2.14 / kernel 7.1.8): host RAM must be ≥ 64 GB.
+- Host RAM may shadow XPU allocations (torch-xpu-ops #5428: torch 2.14 / kernel 7.1.8). **The box has 32 GB**, so
+  measure it with the `host_ram_shadow` probe.
+  - Commit-only: swap or overcommit settings cover it.
+  - Resident: `capacity.py` must subtract the shadow from the host budget, and the server caps its XPU budget
+    (context/KV) to fit.
 - Driver resets on out-of-bounds bugs. The runner must detect a wedged GPU (`xpu-smi` health) and stop the queue.
 - `torch._weight_int4pack_mm` is wrong at M=1 on XPU; never use it as a baseline. Keep `SYCL_CACHE_PERSISTENT=0` and prefer AOT.
 

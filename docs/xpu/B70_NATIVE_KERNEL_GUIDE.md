@@ -171,7 +171,7 @@ pitch a multiple of 16 B, 64 B-aligned base) fetches exactly the nibbles one sub
 | Compiler | **Intel Deep Learning Essentials 2026.1** (icpx / DPC++), matching torch's runtime. **No full oneAPI Base Toolkit and no IPEX in the same environment** | [Triton XPU README](https://github.com/intel/intel-xpu-backend-for-triton) |
 | `ocloc` | installed (see §1.6) | |
 | ReBAR | **enabled** | [Intel](https://www.intel.com/content/www/us/en/support/articles/000099073/graphics.html) |
-| Host RAM | ≥ 64 GB: torch-xpu allocations commit matching host RAM on B70 | [torch-xpu-ops #5428](https://github.com/intel/torch-xpu-ops/issues/5428) |
+| Host RAM | **The test box has 32 GB.** One report says each torch-xpu allocation commits matching host RAM on B70 (torch 2.14 / kernel 7.1.8). Unverified on our box: the `env` suite measures it, and a 32 GB swap file is recommended. See §5.4 | [torch-xpu-ops #5428](https://github.com/intel/torch-xpu-ops/issues/5428) |
 
 Do **not** build on IPEX (end of life March 2026) or IPEX-LLM (archived 2026-01-28). XeTLA is archived; use SYCL*TLA.
 
@@ -333,7 +333,15 @@ SYCL, do the `−128` with an explicit bf16x2 subtract or in fp32; check that IG
    `-ze-opt-greater-than-4GB-buffer-required`
    ([CR guide](https://github.com/intel/compute-runtime/blob/master/programmers-guide/ALLOCATIONS_GREATER_THAN_4GB.md)).
    **TensorFold keeps every tensor < 4 GB.**
-3. Host-RAM shadowing of device allocations.
+3. Host-RAM shadowing of device allocations ([torch-xpu-ops #5428](https://github.com/intel/torch-xpu-ops/issues/5428)).
+   The test box has **32 GB host RAM**. If shadowing applies, the worst case (about 22–28 GB of device allocations
+   mirrored, plus 3–6 GB of OS, Python and load buffers) is about 25–34 GB.
+   - The `env` suite's `host_ram_shadow` probe allocates 4/8/16 GB on XPU and records the change in `MemAvailable`
+     (resident) vs `Committed_AS` (commit only).
+   - If it is commit-only: swap or `vm.overcommit_memory` settings cover it.
+   - If it is resident: cap the XPU memory budget via `TENSORFOLD_MEMORY_RESERVE_GIB` or `--context`, and prefer
+     smaller KV.
+   - `bootstrap.sh` offers a 32 GB swap file.
 4. Driver wedges and reset storms under sustained load, which have even corrupted the host page cache
    ([CR #948](https://github.com/intel/compute-runtime/issues/948),
    [CR #966](https://github.com/intel/compute-runtime/issues/966)). The runner checks `xpu-smi` health and stops the
