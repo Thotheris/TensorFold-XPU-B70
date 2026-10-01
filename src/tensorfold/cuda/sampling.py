@@ -18,8 +18,8 @@ NUCLEUS = 1024          # candidates a rank reads for a top_k-off draw; a row th
 def sample_rows(logits: torch.Tensor, positions: Sequence[int], sampling: Sampling | None) -> list[int]:
     """Sample each row from its logits and absolute position; serial and verify-window rows share this one path."""
 
-    if logits.ndim != 2 or not logits.is_cuda or len(positions) != logits.shape[0]:
-        raise ValueError("expected CUDA logits [rows, vocab] and one position per row")
+    if logits.ndim != 2 or logits.device.type not in ("cuda", "xpu") or len(positions) != logits.shape[0]:
+        raise ValueError("expected GPU (CUDA or XPU) logits [rows, vocab] and one position per row")
     if sampling is None or sampling.temperature <= 0:
         return [int(x) for x in logits.argmax(dim=-1).cpu().tolist()]
     if not sampling.top_k:
@@ -114,6 +114,7 @@ def nucleus_rows(logits: torch.Tensor, positions: Sequence[int], sampling: Sampl
                  probs: list[float] | None = None) -> list[int]:
     """top_k off: the keyed draw over the top_p nucleus then min_p, cut by fixed-point mass, the same on each shape."""
 
+    # [UNVERIFIED] fp64 on Xe2 (B70 probe)
     scaled = logits.float().double() / max(float(sampling.temperature), 1e-6)
     top = _stacked(gather, scaled.max(dim=-1).values).max(dim=0).values           # every rank's maxima
     mass = torch.floor(torch.exp(scaled - top[:, None]) * MASS).to(torch.int64)
