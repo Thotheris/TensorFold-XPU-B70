@@ -145,6 +145,8 @@ def set_allocator_settings(settings: str, device=None) -> None:
 
 
 def host_empty_cache(device=None) -> None:
+    """Give torch's cached pinned host blocks back on CUDA; [UNVERIFIED] XPU's equivalent awaits a B70 probe."""
+
     if _split(device)[0] == "cuda":
         import torch
 

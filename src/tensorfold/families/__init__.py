@@ -252,6 +252,9 @@ def _require_xpu_w4a16(config: dict[str, Any], where: str, tested: str) -> None:
         refuse(found, "group_size 64 or 128")
     if block.get("desc_act"):
         refuse(found, "weights without act-order (desc_act false)")
+    act_bits, data_type = block.get("act_bits"), block.get("data_type")
+    if act_bits not in (None, 16, 32) or str(data_type or "int").lower() != "int":
+        refuse(f"data_type {data_type}, act_bits {act_bits}", "int weights with 16-bit activations (W4A16)")
     extra = block.get("extra_config")
     for layer, entry in (extra.items() if isinstance(extra, dict) else ()):
         if isinstance(entry, dict) and (entry.get("bits", 4) not in (4, 16) or entry.get("sym", True) is False):
