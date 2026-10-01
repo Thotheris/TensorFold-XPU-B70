@@ -284,7 +284,12 @@ The venv is `~/.local/share/tensorfold-xpu/venv` (Python 3.14). It has
 `has_subgroup_matrix_multiply_accumulate` and `has_subgroup_2d_block_io` are true,
 so `ocloc` is visible. A 128-element int32 Triton add matched. `data_ptr()` was
 above 2^63. Triton failed to compile until `libze-dev` 1.32.0 supplied
-`level_zero/ze_api.h`. `xpu-smi` is not installed.
+`level_zero/ze_api.h`. `xpu-smi` 2.2.0 discovery sees the B70 at `0000:0b:00.0`
+with device state `normal`. It needs `libmetee.so.6.2.5.0`, which the OMIX 0.4
+repository does not ship (that repository still has metee 6.2.1 and xpu-smi 2.0.1).
+The 6.2.5 library was built from the Intel tag and installed at
+`/usr/local/lib/libmetee.so.6.2.5.0`. The full `intel-omix` metapackage is not
+installed.
 
 Do not treat the host-RAM deltas as an idle shadow result. The GPU was already in
 use. `mem_get_info()` reported about 112 MiB free while a 2 GiB allocation still
