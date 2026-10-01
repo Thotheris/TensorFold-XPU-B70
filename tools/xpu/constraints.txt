@@ -1,0 +1,6 @@
+# Pass --constraint tools/xpu/constraints.txt to later pip installs.
+# torch must stay 2.14.x+xpu. Bootstrap records the installed wheel's exact version.
+torch==2.14.1+xpu
+# triton pin: bootstrap rewrites this line from the bundled wheel.
+# triton-xpu~=3.8, exact distribution name unconfirmed; placeholder is not authoritative.
+pytorch-triton-xpu==3.8.0
