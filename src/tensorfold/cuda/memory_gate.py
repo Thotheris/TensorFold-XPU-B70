@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from tensorfold import accel
+
 
 class NoRoom(RuntimeError):
     """A request that can't start until a live stream finishes and frees its caches."""
@@ -34,7 +36,11 @@ class MemoryGate:
 def torch_live(torch, available: Callable) -> Callable[[], int]:
     """What the host has free now plus what torch's allocator holds freed (it reuses those without asking)."""
 
-    return lambda: int(available(torch)) + int(torch.cuda.memory_reserved()) - int(torch.cuda.memory_allocated())
+    def live() -> int:
+        gpu = accel.api(torch=torch)
+        return int(available(torch)) + int(gpu.memory_reserved()) - int(gpu.memory_allocated())
+
+    return live
 
 
 __all__ = ["MemoryGate", "NoRoom", "torch_live"]

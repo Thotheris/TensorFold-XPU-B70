@@ -11,6 +11,8 @@ import re
 import struct
 from typing import Callable
 
+from tensorfold import accel
+
 GIB = 1024**3
 # safetensors dtype names -> bytes a value (FP8: the FP4 checkpoints' block scales)
 SIZES = {"U8": 1, "I8": 1, "BOOL": 1, "F8_E4M3": 1, "F8_E5M2": 1, "F8_E8M0": 1,
@@ -150,6 +152,8 @@ def _meminfo() -> dict | None:
 def unified(torch) -> bool:
     """A GPU on the host's memory (GB10): its free figure is MemFree, which counts the page cache as used."""
 
+    if accel.device_type(torch) == "xpu":           # the B70 is discrete
+        return False
     try:
         return bool(torch.cuda.get_device_properties(0).is_integrated)
     except (AttributeError, AssertionError, RuntimeError):
@@ -172,7 +176,7 @@ def reserve_bytes(total: int, *, host: bool = False) -> int:
 
 
 def available_bytes(torch) -> int:
-    free, total = map(int, torch.cuda.mem_get_info())
+    free, total = map(int, accel.api(torch=torch).mem_get_info())
     available = max(0, free - reserve_bytes(total))
     memory = _meminfo()
     if memory is None:
@@ -185,7 +189,7 @@ def available_bytes(torch) -> int:
 def total_bytes(torch) -> int:
     """The GPU's memory (a GB10's is the host's): the same on every rank, so what it sizes agrees without a gather."""
 
-    return int(torch.cuda.mem_get_info()[1])
+    return int(accel.api(torch=torch).mem_get_info()[1])
 
 
 def page_room(torch) -> int | None:
@@ -332,8 +336,10 @@ def tables_note(plan: Plan) -> str | None:
             f"lookups will page them from disk, which slows prompts ({fix})")
 
 
-def gather_ints(torch, gather: Callable, values: list[int], world: int = 2) -> list[list[int]]:
-    send = torch.tensor(values, dtype=torch.int64, device="cuda")
-    receive = torch.empty((world * len(values),), dtype=torch.int64, device="cuda")
+def gather_ints(torch, gather: Callable, values: list[int], world: int = 2,
+                device: str | None = None) -> list[list[int]]:
+    device = device or accel.device_type(torch)
+    send = torch.tensor(values, dtype=torch.int64, device=device)
+    receive = torch.empty((world * len(values),), dtype=torch.int64, device=device)
     gather(send, receive)
     return receive.view(world, -1).tolist()

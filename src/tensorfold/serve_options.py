@@ -19,6 +19,8 @@ def check(args: argparse.Namespace, family: Any, backend: str, config_dir: Any =
         from tensorfold.vision.config import validate_vision_config
 
         validate_vision_config(read_config(config_dir) if config_dir else {}, family.model_type)
+    if backend == "xpu":
+        _check_xpu(args, family)
     share = getattr(args, "decode_share", None)
     if share is not None and backend == "cuda" and not getattr(family.package, "CUDA_DECODE_SHARE", False):
         raise ValueError("--decode-share sets the Mac server's share, and Flash Next's on CUDA; this CUDA engine runs "
@@ -26,13 +28,13 @@ def check(args: argparse.Namespace, family: Any, backend: str, config_dir: Any =
     if share is not None and share < 0:
         raise ValueError(f"--decode-share is 0 (whole prompts first) or more, not {share}")
     kv = getattr(args, "kv_dtype", "bf16")
-    if kv != "bf16" and backend != "cuda":
+    if kv != "bf16" and backend not in ("cuda", "xpu"):
         raise ValueError(f"--kv-dtype {kv} is a CUDA engine option: the MLX path caches keys and values as bf16")
     supported = getattr(family.package, "CUDA_KV_DTYPES", ("bf16",))
     if kv not in supported:
         raise ValueError(f"{family.title} on CUDA serves a {' or '.join(supported)} KV cache, not --kv-dtype {kv}")
     slots = getattr(args, "checkpoint_slots", None)
-    if slots is not None and backend == "cuda" and getattr(family.package, "CUDA_CHECKPOINT_SLOTS", False):
+    if slots is not None and backend in ("cuda", "xpu") and getattr(family.package, "CUDA_CHECKPOINT_SLOTS", False):
         if slots < 1:
             raise ValueError(f"--checkpoint-slots is 1 or more, not {slots}")
         if _cuda_streams(getattr(args, "parallel", "auto")) < 2:
@@ -45,12 +47,28 @@ def check(args: argparse.Namespace, family: Any, backend: str, config_dir: Any =
     confidence = getattr(args, "mtp_confidence", None)
     if confidence is None:
         return
-    engine = getattr(family.package, "cuda_engine", None) if backend == "cuda" else None
+    engine = getattr(family.package, f"{backend}_engine", None) if backend in ("cuda", "xpu") else None
     if engine is None or "mtp_confidence" not in inspect.signature(engine).parameters:
+        name = {"cuda": "CUDA", "xpu": "XPU"}.get(backend, "MLX")
         raise ValueError(f"--mtp-confidence sets where a CUDA engine's MTP chains stop; {family.title} on "
-                         f"{'CUDA' if backend == 'cuda' else 'MLX'} has no such rule")
+                         f"{name} has no such rule")
     if not 0.0 <= confidence <= 1.0:
         raise ValueError(f"--mtp-confidence is a probability from 0 to 1, not {confidence}")
+
+
+def _check_xpu(args: argparse.Namespace, family: Any) -> None:
+    """Refuse the options the XPU engine has no path for yet: FP8 prompts, a quantized KV cache, two GPUs, a share."""
+
+    if getattr(args, "prefill_fp8", None):
+        raise ValueError(f"--prefill-fp8 picks FP8 prompt kernels, which need FP8 hardware; the B70 has none, so "
+                         f"{family.title} prompts on XPU run bf16 activations")
+    kv = getattr(args, "kv_dtype", "bf16")
+    if kv != "bf16":
+        raise ValueError(f"--kv-dtype {kv} is not served on XPU yet: its KV cache is bf16")
+    if getattr(args, "tp", 1) == 2:
+        raise ValueError("--tp 2 is not served on XPU yet: one B70")
+    if getattr(args, "decode_share", None) is not None:
+        raise ValueError("--decode-share is not served on XPU yet")
 
 
 def _cuda_streams(value: Any) -> int:

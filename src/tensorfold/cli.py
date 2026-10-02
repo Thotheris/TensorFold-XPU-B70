@@ -118,13 +118,15 @@ def cmd_models(args: argparse.Namespace) -> int:
 
 
 def _engines(family: Any) -> str:
-    """Which backends serve a family: MLX (its lane or serial engine) and CUDA."""
+    """Which backends serve a family: MLX (its lane or serial engine), CUDA and XPU."""
 
     found = []
     if hasattr(family.package, "load"):
         found.append(f"MLX {'lane engine' if family.lanes else 'serial engine'}")
     if hasattr(family.package, "cuda_engine"):
         found.append("CUDA engine")
+    if hasattr(family.package, "xpu_engine"):
+        found.append("XPU engine")
     return ", ".join(found) or "no engine"
 
 
@@ -153,7 +155,8 @@ def cmd_info(args: argparse.Namespace) -> int:
     readers = [b for b in families.backends_of(family)
                if families.quant_method(config) in families.readable_quants(family, b)]
     if readers:
-        print(f"runs on      {', '.join('NVIDIA GPUs (CUDA)' if b == 'cuda' else 'Apple Silicon (MLX)' for b in readers)}")
+        names = {"cuda": "NVIDIA GPUs (CUDA)", "xpu": "Intel GPUs (XPU)"}
+        print(f"runs on      {', '.join(names.get(b, 'Apple Silicon (MLX)') for b in readers)}")
     else:
         print(f"runs on      not yet: no {family.title} engine reads these weights. {families.OWN_MODEL_HELP}")
     generation = _generation_config(directory)
@@ -217,11 +220,21 @@ def _note_untested(family: Any, model: str) -> None:
 
 
 def _backend(choice: str, family: Any) -> str:
-    """mlx or cuda: auto picks MLX on macOS and CUDA elsewhere; a family serves only the backends it has."""
+    """mlx, cuda or xpu: auto picks MLX on macOS, else XPU when an Intel GPU is present without an NVIDIA one, else CUDA."""
 
-    backend = choice if choice != "auto" else ("mlx" if sys.platform == "darwin" else "cuda")
+    if choice != "auto":
+        backend = choice
+    elif sys.platform == "darwin":
+        backend = "mlx"
+    else:
+        from tensorfold import accel
+
+        backend = accel.device_type()
     if backend == "cuda" and not hasattr(family.package, "cuda_engine"):
         raise ValueError(f"{family.title} has no CUDA engine yet: serve it on Apple Silicon")
+    if backend == "xpu" and not hasattr(family.package, "xpu_engine"):
+        raise ValueError(f"{family.title} has no XPU engine yet: the Intel Arc B70 backend is in progress "
+                         f"(docs/xpu/PORT_PLAN.md); serve it on NVIDIA GPUs or Apple Silicon")
     if backend == "mlx" and not hasattr(family.package, "load"):
         raise ValueError(f"{family.title} runs on NVIDIA GPUs only (see docs/recipes)")
     return backend
@@ -229,6 +242,13 @@ def _backend(choice: str, family: Any) -> str:
 
 def _serve_cuda(args: argparse.Namespace, family: Any, model_dir: Path, context: int | None = None) -> int:
     """Serve with the family's CUDA engine (``cuda_engine``) behind ``tensorfold.cuda.server``."""
+
+    return _serve_torch(args, family, model_dir, context, "cuda")
+
+
+def _serve_torch(args: argparse.Namespace, family: Any, model_dir: Path, context: int | None = None,
+                 device: str = "cuda") -> int:
+    """Serve with the family's torch engine (``cuda_engine`` or ``xpu_engine``) behind ``tensorfold.cuda.server``."""
 
     from tensorfold import hub
 
@@ -260,12 +280,16 @@ def _serve_cuda(args: argparse.Namespace, family: Any, model_dir: Path, context:
         options["checkpoint_slots"] = int(args.checkpoint_slots)
     served = args.name or (args.model.rstrip("/").split("/")[-1] if hub.is_repo_id(args.model) else model_dir.name)
     where = f", rank {args.rank} of 2" if args.tp == 2 else ""
-    print(f"[tensorfold] loading {served}: {family.title} ({family.model_type}) on CUDA{where}", flush=True)
+    name = "XPU" if device == "xpu" else "CUDA"
+    print(f"[tensorfold] loading {served}: {family.title} ({family.model_type}) on {name}{where}", flush=True)
     from tensorfold.cuda import prompt_precision
 
     asked = getattr(args, "prefill_fp8", None)
-    prompt_precision.set_fp8(prompt_precision.FP8_BY_DEFAULT if asked is None else asked)   # before any weight loads
-    engine = family.package.cuda_engine(model_dir, **options)
+    if device == "xpu":
+        prompt_precision.set_fp8(False)             # no FP8 hardware: prompts run bf16
+    else:
+        prompt_precision.set_fp8(prompt_precision.FP8_BY_DEFAULT if asked is None else asked)   # before any weight loads
+    engine = getattr(family.package, "xpu_engine" if device == "xpu" else "cuda_engine")(model_dir, **options)
     fp8 = prompt_precision.fp8() and bool(getattr(getattr(engine, "w", None), "fast_prefill", False))
     if asked and not fp8:
         raise ValueError("--prefill-fp8: this checkpoint's prompt matmuls have no FP8 kernel (EXL3 packs, MLX formats "
@@ -290,7 +314,7 @@ def _serve_cuda(args: argparse.Namespace, family: Any, model_dir: Path, context:
     shown = "greedy" if float(sampling.get("temperature", 1.0)) <= 0 else ", ".join(
         f"{k} {v}" for k, v in sampling.items())
     effective_context = app.effective_context_window
-    print(f"[tensorfold] serving {served} at http://{args.host}:{args.port}/v1 on CUDA{where} "
+    print(f"[tensorfold] serving {served} at http://{args.host}:{args.port}/v1 on {name}{where} "
           f"(sampling: {shown}; drafts: {'off' if args.no_drafts else 'on'}; "
           f"prompts: {'FP8 activations' if fp8 else 'bf16 activations'}; "
           f"context: {'unlimited' if effective_context is None else effective_context}; "
@@ -354,6 +378,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     stacks.start()          # `kill -USR1 <pid>` prints every thread's Python stack: where a silent server waits
     if backend == "cuda":
         return _serve_cuda(args, family, model_dir, context)
+    if backend == "xpu":
+        return _serve_torch(args, family, model_dir, context, "xpu")
     for key, value in getattr(family.package, "MLX_ENV", {}).items():
         os.environ.setdefault(key, value)       # before MLX starts: it reads them once
     import mlx.core as mx
