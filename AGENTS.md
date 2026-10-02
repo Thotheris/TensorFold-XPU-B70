@@ -33,6 +33,7 @@ or compressed-tensors `pack-quantized`. MLX, EXL3, NVFP4 and FP8 are refused. Se
 | Native SYCL/ESIMD kernels, hardware, toolchain | [docs/xpu/B70_NATIVE_KERNEL_GUIDE.md](docs/xpu/B70_NATIVE_KERNEL_GUIDE.md) |
 | Checkpoint loading, weight layouts | [docs/xpu/QUANT_FORMATS.md](docs/xpu/QUANT_FORMATS.md) |
 | EXL3 on XPU (later, WS10) | [docs/xpu/EXL3_PORT.md](docs/xpu/EXL3_PORT.md) |
+| Container image, runner in Docker | [docs/xpu/CONTAINER.md](docs/xpu/CONTAINER.md) |
 | Current state, open problems | `docs/xpu/STATUS.md` (written by the Analyst; may not exist yet) |
 | A specific kernel | its card in `docs/xpu/kernels/<kernel>.md` |
 | How upstream adds a CUDA family | [docs/recipes/adding-a-cuda-family.md](docs/recipes/adding-a-cuda-family.md) |
