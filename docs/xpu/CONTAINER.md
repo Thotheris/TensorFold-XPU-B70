@@ -73,7 +73,8 @@ installs the pinned debs. The `+u24.04` IGC and loader debs already install on t
 
 ## 4. Runner integration (`tools/xpu/b70_runner.py`, new `tools/xpu/container.py`)
 
-Opt-in with `TF_XPU_IMAGE` / `--image`; the venv mode stays the default until both agree (§7).
+Container mode is the default once the image builds: the runner uses `TF_XPU_IMAGE` / `--image` when set, and
+`TF_XPU_MODE=venv` falls back to the host venv for one cycle (§7).
 
 `container.py` builds the `docker run` argv (reusing `refuse_shell_meta`):
 
@@ -123,13 +124,14 @@ protocol `invoke_suite` uses today.
 
 1. Operator installs Docker on the host (`docker.io` from the 26.04 archive) and adds the runner user to `docker`, or
    uses rootless Docker.
-2. Build `toolchain`; run `env` by hand with the §4 arguments; compare with the latest venv `env` bundle.
-3. Set `TF_XPU_IMAGE` in `runner.env`; push a branch whose `.b70/run.yml` asks for `suites: [env, unit-host]`.
-4. Iterate until a container bundle and a venv bundle agree on torch, triton, `torch.version.xpu`, the DPAS flags and
-   `triton_add`.
-5. Make container mode the default. In HARNESS.md mark `bootstrap.sh --apply` and `--system` deprecated, keep
-   `--install-kernel` and the read-only report, and move `--swap` and `--models` to host steps. Remove the venv mode in
-   a later PR.
+2. Build `toolchain` and run `env` by hand with the §4 arguments.
+3. **Once the image builds, container mode is the default.** The runner uses `TF_XPU_IMAGE` (set in `runner.env`)
+   whenever it is set; `TF_XPU_MODE=venv` keeps the old path as a fallback for one cycle. Push a branch whose
+   `.b70/run.yml` asks for `suites: [env, unit-host]`.
+4. Compare the first container `env` bundle with the latest venv `env` bundle: torch, triton, `torch.version.xpu`, the
+   DPAS flags and `triton_add`. A difference is a container bug to fix, not a reason to switch back.
+5. In HARNESS.md mark `bootstrap.sh --apply` and `--system` deprecated, keep `--install-kernel` and the read-only
+   report, and move `--swap` and `--models` to host steps. Remove the venv mode and `TF_XPU_MODE` in a later PR.
 
 ## 8. Done when
 
