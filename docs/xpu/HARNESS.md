@@ -5,7 +5,7 @@
 The harness prepares a user-run Ubuntu box with one Intel Arc Pro B70 (PCI 8086:E223,
 BMG-G31), checks new `xpu/*` heads in isolated worktrees, and publishes result bundles on
 the fork's orphan `results` branch. This host is expected to have 32 GB of RAM. Local host
-tests are not GPU results. See [PORT_PLAN.md](PORT_PLAN.md) for ownership and milestones,
+tests are not GPU results. See [PORT_PLAN.md](PORT_PLAN.md) for work areas and milestones,
 and [B70_NATIVE_KERNEL_GUIDE.md](B70_NATIVE_KERNEL_GUIDE.md) for hardware and build rules.
 
 ## Box setup

@@ -11,8 +11,8 @@ PyTorch XPU), with a second B70 planned later. The first targets are two recipes
 - **B: Nemotron 3.5 Lightning 30B-A3B W4A16 AutoRound + MTP** (`families/nemotron_h`): Mamba-2, attention and
   128-expert MoE, captured as CUDA graphs.
 
-Development happens in cloud and local agent branches. The B70 box pulls a branch, builds and tests it, and pushes
-results to a `results` branch. Analyst agents read the results and file the next work. Then the loop repeats.
+Development happens on the `xpu/main` trunk, one topic per commit. The B70 box pulls each new head, builds and tests
+it, and pushes results to a `results` branch. The results decide the next work. Then the loop repeats.
 
 **Three findings from the code maps shape this plan:**
 1. The HTTP, OpenAI, scheduler and drafting layers are device-free. CUDA coupling sits in about 15 CLI/registry lines,
@@ -63,13 +63,13 @@ sits behind the same Python `_ext()` signature, so engines don't change when it 
 
 ### Branches (fork `Thotheris/TensorFold-XPU-B70`)
 - `upstream-main`: mirrors `ashhart/TensorFold` main. It is refreshed by hand and only ever merged forward.
-- `xpu/main`: the integration trunk. Only the Integrator agent merges here, and only after a green B70 run.
-- `xpu/<ws>/<topic>`: one branch per work item, e.g. `xpu/k1/gdn-triton` or `xpu/infra/accel`. Each branches from
-  `xpu/main` and stays small.
+- `xpu/main`: the trunk. Work is committed here directly; every push gets a B70 run, and a red run is fixed forward.
+- `xpu/<topic>`: optional and short-lived, for throwaway experiments only. Merged into `xpu/main` or deleted.
+- `main`: a milestone snapshot, updated from `xpu/main` by the owner.
 - `results`: an orphan branch that holds only result bundles. It never merges into code branches.
 
-### How a branch asks the B70 to run it
-A branch carries **`.b70/run.yml`**:
+### How a commit asks the B70 to run it
+`xpu/main` carries a standing **`.b70/run.yml`**, edited in the same commit when a change needs other suites:
 ```yaml
 suites: [env, unit-xpu, kernels:gdn, e2e:27b-smoke]   # names from tools/xpu/suites.py
 baseline: xpu/main          # which run to diff against
@@ -96,31 +96,30 @@ model_cache: /models        # where checkpoints live on the B70 box
 Security note: the runner executes code from branches in the fork. Restrict it to `xpu/*` refs on the fork, run it as an
 unprivileged user, and keep secrets off the box (a push-only deploy key for `results`).
 
-### Analysis step (Analyst agent)
+### Analysis step
 - It reads `results/index.jsonl` and new bundles, and runs `tools/xpu/compare.py <bundle> <baseline>`. That tool reports
   regressions, new failures, bitwise-check breaks and perf deltas by kernel and end to end.
-- It writes `runs/.../analysis.md` and updates `docs/xpu/STATUS.md` on its own `xpu/docs/status` branch. It then opens
-  or updates GitHub issues labelled `ws:<n>` with concrete next tasks. Developer agents pick up those issues.
+- It updates `docs/xpu/STATUS.md` on `xpu/main` with the regressions, failures and the next tasks.
 
 ---
 
-## 1. Agent roster and ownership
+## 1. Work areas
 
-To avoid merge conflicts, each agent owns specific paths.
+The fork is worked serially by one person and usually one agent. These areas label work, not owners; there is no
+per-agent branch or file ownership (AGENTS.md §7). The model column is a suggestion for an agent working that area.
 
-| Agent | Owns | Model |
+| Area | Paths | Model |
 |---|---|---|
-| **Integrator** | merges to `xpu/main`, `.b70/`, release notes, upstream rebases | Opus |
 | **Infra** (WS1) | `src/tensorfold/accel.py`, `cli*.py`, `families/__init__.py`, `serve_options.py`, `cuda/{capacity,memory_gate,direct_read,build}.py`, new `xpu/` package skeleton | Sonnet |
 | **Harness** (WS2) | `tools/xpu/**`, `tests/conftest.py`, `tests/cuda/conftest.py`, the device fixture, `tests/xpu/**` | Sonnet |
 | **Triton-port** (WS3) | existing Triton modules used by recipes A and B (portability fixes only) | Sonnet |
-| **Kernel agents K1–K7** (WS4) | one kernel family each: new Triton/SYCL sources and their test and bench files | Opus |
+| **Kernels K0–K7** (WS4) | one kernel family each: new Triton/SYCL sources and their test and bench files | Opus |
 | **Loader** (WS3b) | `src/tensorfold/xpu/quant/**`, the `QUANT_METHODS["xpu"]` entries, quant tests | Sonnet |
 | **Engine-A / Engine-B** (WS5) | `families/qwen3_5/**`, `families/nemotron_h/**` engine wiring | Opus |
-| **Analyst** | `results` bundles, `docs/xpu/STATUS.md`, issues | Sonnet |
+| **Status** | `results` bundles, `docs/xpu/STATUS.md` | Sonnet |
 | **Docs** | `docs/xpu/*.md` guides (kept current as findings come in) | Sonnet |
 
-Every agent reads `AGENTS.md` (the fork root) first. It holds the rules: exactness contract, branch naming, `.b70/run.yml`,
+Every agent reads `AGENTS.md` (the fork root) first. It holds the rules: exactness contract, the trunk workflow, `.b70/run.yml`,
 never touch the CUDA path's behaviour, and how to read results.
 
 ---
@@ -144,7 +143,7 @@ never touch the CUDA path's behaviour, and how to read results.
   features, fallback, owner and status. Sections 4–5 below are its seed.
 - `docs/xpu/kernels/<kernel>.md`: one **kernel card** per port target (template in §4.0).
 - `docs/xpu/HARNESS.md`: B70 box setup, runner, suites and result schema.
-- `docs/xpu/STATUS.md`: kept by the Analyst.
+- `docs/xpu/STATUS.md`: updated after each B70 run that changes the picture.
 - `AGENTS.md`: agent operating rules (above).
 
 ---
@@ -256,7 +255,7 @@ Known risks to resolve:
 Rule: changes must leave the CUDA output bit-identical. Use per-device constants (`XPU_CONFIG`) rather than editing CUDA
 configs.
 
-### WS3b — W4A16 checkpoint loaders (Loader agent; owns `src/tensorfold/xpu/quant/**`, the family `QUANT_METHODS["xpu"]` entries, `tests/test_xpu_quant_*.py`)
+### WS3b — W4A16 checkpoint loaders (Loader; `src/tensorfold/xpu/quant/**`, the family `QUANT_METHODS["xpu"]` entries, `tests/test_xpu_quant_*.py`)
 Purpose: read the primary and secondary checkpoints into one internal **`W4` weight object** that the matmul and expert
 kernels consume. Precedent: upstream's `qwen3_5/cuda/{exl3_load,nvfp4_load}.py` and the `require_readable` /
 `QUANT_METHODS` plumbing.
@@ -532,12 +531,12 @@ Full analysis and phases: [EXL3_PORT.md](EXL3_PORT.md).
 
 ## 8. Milestones and parallel schedule
 
-| Phase | Parallel work items (separate branches/agents) | Exit gate (B70 bundle) |
+| Phase | Work items (in any order on `xpu/main`) | Exit gate (B70 bundle) |
 |---|---|---|
 | **P0 Setup** | Docs: guides plus AGENTS.md · Harness: bootstrap, runner, suites `env` · K0: build plus hello-SYCL/DPAS · Infra: accel and CLI | `env` suite green; SYCL and Triton smoke pass on the B70 |
 | **P1 Triton bring-up** | Harness: device fixture, test rewrite · WS3 Triton port (A and B modules, smoke ladder S0–S7) · K1.T0 **and K1.N0 spike in parallel** (Triton recurrence DEVICE_LOST risk) · K2.T0 + K2.N0 spike · K3.T0 (plan, pack, decode, prefill) · K4.T0 format matrix (g128, fp16, SYM, bf16 GEMV) · WS3b loaders (detect, map, repack) · Infra: engines take a device | `unit-xpu` for A and B kernels green; invariance tests green |
 | **P2 Recipes correct** | Engine-A M-A1..A3 · Engine-B M-B1..B2, on the **AutoRound primary** checkpoints (synthetic SYM tiny models before that) | `e2e:*-smoke` on the AutoRound checkpoints: drafted == serial token_sha for both recipes, plus the WS3b quality gate |
-| **P3 Native kernels** | K4.N · K1.N · K3.N · K5.N, each an independent branch with kbench | each passes its promotion rule |
+| **P3 Native kernels** | K4.N · K1.N · K3.N · K5.N, each one topic with kbench | each passes its promotion rule |
 | **P4 Perf and polish** | WS6 graphs, fusion, `--parallel`, docs | roofline targets; full bench bundle published |
 | **P5 Nemotron DFlash** | WS9 | drafted == serial; speedup reported |
 | **P6 Two GPUs** | WS7 | when the second B70 arrives |
@@ -546,7 +545,7 @@ Full analysis and phases: [EXL3_PORT.md](EXL3_PORT.md).
 ---
 
 ## 9. Verification (end to end)
-- **On the B70, per branch** via `.b70/run.yml`:
+- **On the B70, per pushed head** via `.b70/run.yml`:
   - `env` → `unit-xpu` → relevant `kernels:*` → `e2e:27b-smoke` and `e2e:nemotron-smoke`.
   - Smoke = start `tensorfold serve <ckpt> --backend xpu`, `curl /health`, `/v1/models`, and a chat completion.
   - Then `python tools/bench_concurrent.py ... --serial` asserts drafted token_sha == serial for fixed prompts and seeds.
@@ -555,7 +554,7 @@ Full analysis and phases: [EXL3_PORT.md](EXL3_PORT.md).
 - **Quality tests (tolerance):** vs `reference.py` fp32/fp64, and greedy argmax agreement ≥ 0.9 vs reference on the
   tiny models.
 - **CUDA non-regression:** every PR keeps `tests/` host-side green. The CUDA path's behaviour must not change; the
-  Integrator spot-checks on an NVIDIA box if one is available, or at least checks that `tests/cuda` collects unchanged.
+  owner spot-checks on an NVIDIA box if one is available, or at least checks that `tests/cuda` collects unchanged.
 - **Perf:** `kbench` and e2e numbers in each bundle; `compare.py` flags >3% regressions against `xpu/main`.
 
 ## Appendix A — B70 facts that drive this plan (full sourced report → `docs/xpu/B70_NATIVE_KERNEL_GUIDE.md`)

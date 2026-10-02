@@ -1,7 +1,7 @@
 # The B70 container
 
-Status: **plan**. Owner: Harness (WS2), on one branch `xpu/harness/container` cut from `xpu/main`. Paths below
-(`tools/xpu/**`, `docs/xpu/HARNESS.md`) are as they stand on `xpu/main`.
+Status: **plan**. Area: Harness (WS2), committed on `xpu/main`. Paths below (`tools/xpu/**`, `docs/xpu/HARNESS.md`)
+are as they stand on `xpu/main`.
 
 The B70's userspace toolchain moves from the host (`tools/xpu/bootstrap.sh --apply --system` plus a host venv) into an
 Ubuntu 26.04 image. The image runs tests and serves. It never contains a SYCL compiler. Native kernels are compiled on
@@ -126,8 +126,8 @@ protocol `invoke_suite` uses today.
    uses rootless Docker.
 2. Build `toolchain` and run `env` by hand with the §4 arguments.
 3. **Once the image builds, container mode is the default.** The runner uses `TF_XPU_IMAGE` (set in `runner.env`)
-   whenever it is set; `TF_XPU_MODE=venv` keeps the old path as a fallback for one cycle. Push a branch whose
-   `.b70/run.yml` asks for `suites: [env, unit-host]`.
+   whenever it is set; `TF_XPU_MODE=venv` keeps the old path as a fallback for one cycle. Push to `xpu/main` with
+   `.b70/run.yml` asking for `suites: [env, unit-host]`.
 4. Compare the first container `env` bundle with the latest venv `env` bundle: torch, triton, `torch.version.xpu`, the
    DPAS flags and `triton_add`. A difference is a container bug to fix, not a reason to switch back.
 5. In HARNESS.md mark `bootstrap.sh --apply` and `--system` deprecated, keep `--install-kernel` and the read-only
@@ -143,4 +143,4 @@ protocol `invoke_suite` uses today.
 docker run --rm -it --device /dev/dri --group-add <render gid> -p 8000:8000 -v <HF_HOME>:/models:ro -e HF_HOME=/models tensorfold-xpu:<tag> serve ...
 ```
 
-No CUDA path changes. Every file is Harness-owned except the AGENTS.md pointer, which already exists.
+No CUDA path changes. Everything is in the Harness area; the AGENTS.md pointer already exists.

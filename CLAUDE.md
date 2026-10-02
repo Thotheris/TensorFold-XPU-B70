@@ -5,12 +5,13 @@
 The import above loads the full agent manual. These notes cover how Claude Code should work in this repo specifically.
 
 ## Start of every session
-1. Find your role: read the task and match it to a role in AGENTS.md §7. Stay within the paths that role owns.
+1. Find the work area for the task in AGENTS.md §7 and read its guide.
 2. Check the current state:
    - read `docs/xpu/STATUS.md` (if present);
    - run `git fetch origin results && git show origin/results:index.jsonl | tail -n 20` to see recent B70 runs;
    - read the kernel card for anything you touch.
-3. Branch from `xpu/main` as `xpu/<ws>/<topic>` before editing. Don't commit port code directly to `main`.
+3. Work on `xpu/main` (pull first) and commit there directly; a short-lived `xpu/<topic>` branch only for work you may
+   throw away. Never commit to `main`.
 
 ## Working style here
 - **This machine is not the B70 box.** You can run `python -m pytest tests -q` and `ruff check src tests` locally. GPU
@@ -24,14 +25,13 @@ The import above loads the full agent manual. These notes cover how Claude Code 
   a probe to the `env` / `triton-smoke` suite rather than coding around a guess.
 - **Match upstream style:** one-line docstrings that state what is true, sparse comments, and 120 columns. Read a
   neighbouring file first.
-- **Keep changes small.** One kernel or one layer per branch keeps B70 runs short and diffs reviewable.
+- **Keep changes small.** One kernel or one layer per commit keeps B70 runs short and a red bundle easy to pin.
 
 ## Subagents and parallel work
-- The plan is designed for several agents working in parallel on separate `xpu/*` branches with disjoint file
-  ownership (AGENTS.md §7). When spawning subagents, give each one role, one branch and the paths it owns. Tell it to
-  read AGENTS.md and the relevant guide first.
-- Use read-only exploration agents for surveys (for example "which tests pin `_scan` bits"). Use writing agents only
-  for owned paths.
+- Work is serial: one B70 runs one head at a time, so parallel writing agents mostly queue. Prefer one agent on
+  `xpu/main`.
+- Use read-only exploration agents for surveys (for example "which tests pin `_scan` bits"). If you do spawn a writing
+  agent, give it disjoint paths and tell it to read AGENTS.md and the relevant guide first.
 
 ## Things to never do
 - Source oneAPI `setvars.sh` / put `icpx` on PATH in a shell that runs Python. Native builds go through
@@ -46,5 +46,5 @@ python -m pip install -e '.[test]'
 python -m pytest tests -q
 ruff check src tests
 git fetch origin results && git show origin/results:index.jsonl | tail -n 20
-git fetch upstream    # ashhart/TensorFold, for reference; syncs are the Integrator's job
+git fetch upstream    # ashhart/TensorFold, for reference; sync only when the owner asks
 ```

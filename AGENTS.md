@@ -154,37 +154,37 @@ claim a GPU test passed unless a results bundle shows it.
 8. **Graphs** are off on XPU until a graphs == eager bitwise test passes on the box.
 9. **FP8 paths** (`--prefill-fp8`, int8/int4 KV) are refused on XPU.
 
-## 7. Workstreams and file ownership
+## 7. Work areas
 
-Each role owns paths. Change only files your role owns. If you need a change elsewhere, open a GitHub issue labelled
-`ws:<owner>` describing it.
+One person works this fork, usually with one agent at a time, against one B70. There are no per-role branches or file
+ownership. The workstream names (WS1-WS10, K0-K7) in PORT_PLAN.md label areas of work, not owners:
 
-| Role | Owns |
+| Area | Paths |
 |---|---|
-| Integrator | merges to `xpu/main` and `main`; `.b70/`; upstream syncs; CHANGELOG |
 | Infra (WS1) | `src/tensorfold/accel.py`, `cli*.py`, `families/__init__.py`, `serve_options.py`, `cuda/{capacity,memory_gate,direct_read,build}.py`, `src/tensorfold/xpu/__init__.py` |
-| Harness (WS2) | `tools/xpu/**`, `tests/conftest.py`, `tests/cuda/conftest.py`, `tests/devices.py`, `tests/xpu/**`, test device-fixture rewrites |
+| Harness (WS2) | `tools/xpu/**`, `.b70/`, `tests/conftest.py`, `tests/cuda/conftest.py`, `tests/devices.py`, `tests/xpu/**` |
 | Triton-port (WS3) | portability fixes inside existing Triton modules on the A/B paths (see KERNEL_MAP) |
 | Loader (WS3b) | `src/tensorfold/xpu/quant/**`, `QUANT_METHODS["xpu"]` entries, `tests/test_xpu_quant_*.py` |
-| Kernel K0–K7 (WS4) | `src/tensorfold/xpu/kernels/<k>/**`, `src/tensorfold/xpu/build.py` (K0), `docs/xpu/kernels/<k>.md`, the kernel's tests and bench |
-| Engine-A / Engine-B (WS5) | XPU wiring in `families/qwen3_5/**` and `families/nemotron_h/**` |
-| Analyst | the `results` branch analysis, `docs/xpu/STATUS.md`, issues |
+| Kernels K0-K7 (WS4) | `src/tensorfold/xpu/kernels/<k>/**`, `src/tensorfold/xpu/build.py` (K0), `docs/xpu/kernels/<k>.md`, the kernel's tests and bench |
+| Engines (WS5) | XPU wiring in `families/qwen3_5/**` and `families/nemotron_h/**` |
+| Status | analysis of `results`, `docs/xpu/STATUS.md` |
 | Docs | `docs/xpu/*.md` guides |
+
+Keep each commit to one area and one topic, so a red bundle points at one change.
 
 ## 8. Branches and the B70 test loop
 
-- `xpu/main`: **the fork's default branch.** Clone it, branch from it, and target every PR at it.
-- `main`: a milestone snapshot. The Integrator merges `xpu/main` into `main` at milestones; agents never target it.
-- `xpu/main` is also the integration trunk for port code. Only the Integrator merges here, and only after a green B70 bundle
-  for the exact head SHA.
-- `xpu/<ws>/<topic>`: your work branch, cut from `xpu/main` (e.g. `xpu/k1/gdn-triton`, `xpu/infra/accel`). One topic
-  per branch; keep it small.
+- `xpu/main`: **the trunk and the fork's default branch.** Commit to it directly and push. Every push gets a B70 run.
+- Short-lived `xpu/<topic>` branches are optional, for work you may throw away (a native-kernel experiment, a risky
+  refactor). Merge them into `xpu/main` or delete them; don't keep long-lived branches.
+- `main`: a milestone snapshot. At a milestone the owner merges `xpu/main` into it. Agents never commit to `main`.
 - `results`: an orphan branch of result bundles. Never merge it anywhere.
+- `xpu/main` is **not** guaranteed green. A red bundle names the commit that broke it; fix forward on `xpu/main`.
 - `upstream` remote: `ashhart/TensorFold`. **Fetch only. Never push, open PRs or file issues there** unless the repo
   owner explicitly says the work is ready. The same applies to every other third-party project we learn from (for
-  example `0xSero/exl3xpu`): read and copy (with licence attribution), never push, PR or file issues. In every clone, disable it with
-  `git remote set-url --push upstream DISABLED-do-not-push-to-upstream`. All pushes go to `origin`
-  (`Thotheris/TensorFold-XPU-B70`). Upstream merges into this fork are the Integrator's job and go forward only.
+  example `0xSero/exl3xpu`): read and copy (with licence attribution), never push, PR or file issues. In every clone,
+  disable it with `git remote set-url --push upstream DISABLED-do-not-push-to-upstream`. All pushes go to `origin`
+  (`Thotheris/TensorFold-XPU-B70`). Upstream merges into this fork happen only when the owner asks, and go forward only.
 
 **Fresh-clone setup (run once in every clone, before any `git push` or `gh` command):**
 ```bash
@@ -193,21 +193,21 @@ git remote set-url --push upstream DISABLED-do-not-push-to-upstream   # if an up
 gh repo set-default Thotheris/TensorFold-XPU-B70                      # gh must never default to the parent repo
 ```
 
-**Opening a PR:** always name the repo and base explicitly. In a fork, `gh` may otherwise target `ashhart/TensorFold`.
+**If you open a PR** (optional, for a short-lived branch), name the repo and base explicitly. In a fork, `gh` may
+otherwise target `ashhart/TensorFold`.
 ```bash
 gh pr create --repo Thotheris/TensorFold-XPU-B70 --base xpu/main --head <your-branch>
 ```
-Before submitting through the web UI, check that the base repository is `Thotheris/TensorFold-XPU-B70` and the base
-branch is `xpu/main`.
 
-**To get a hardware run**, commit `.b70/run.yml` on your branch and push:
+**To get a hardware run**, push. The runner runs `.b70/run.yml` from the pushed commit; `xpu/main` keeps a standing one.
+Edit it in the same commit when a change needs other suites:
 ```yaml
 suites: [env, unit-xpu, kernels:gdn]   # names defined in tools/xpu/suites.py
 baseline: xpu/main
 timeout_min: 90
 ```
 
-The B70 runner (`tools/xpu/b70_runner.py`, planned) checks out each new `xpu/*` head, installs it `--no-deps` into the
+The B70 runner (`tools/xpu/b70_runner.py`, planned) checks out each new `xpu/*` head (normally `xpu/main`), installs it `--no-deps` into the
 pinned venv and runs the suites. It then commits a bundle to `results` at `runs/<branch-slug>/<sha7>-<utc>/`:
 - `summary.md`
 - `env.json` (toolchain and checkpoint revisions)
@@ -225,8 +225,9 @@ git show origin/results:index.jsonl | tail -n 20
 git show origin/results:runs/<branch-slug>/<sha7>-<utc>/summary.md
 ```
 
-The runner executes branch code on the user's machine. Do not put anything in a branch that touches files outside the
-worktree, downloads unvetted binaries, or needs secrets.
+The runner tests the head at poll time, so several pushes within one poll interval (five minutes) get one run for the
+last of them. The runner executes pushed code on the user's machine. Do not commit anything that touches files outside
+the worktree, downloads unvetted binaries, or needs secrets.
 
 ## 9. Code conventions (match upstream)
 
@@ -235,7 +236,7 @@ worktree, downloads unvetted binaries, or needs secrets.
     and commit replays run the serial step, bit for bit.");
   - terse one-line comments for non-obvious constraints only;
   - `from __future__ import annotations`; type hints on public functions; `__all__` in library modules.
-- Line length 120 (ruff). No new runtime dependencies without the Integrator's sign-off. torch and triton are never
+- Line length 120 (ruff). No new runtime dependencies without the owner's sign-off. torch and triton are never
   dependencies.
 - **Import torch inside backend code**, not at family-package import time, so family discovery works on MLX installs.
 - Native sources and data files must be declared as package data in `pyproject.toml`. `tests/test_packaging.py`
@@ -284,8 +285,8 @@ Open issues:
 - Use upstream's Conventional Commits style with a scope: `feat(xpu): ...`, `fix(xpu/k1): ...`,
   `perf(xpu/k4): ...`, `test(xpu): ...`, `docs(xpu): ...`. Imperative, specific, and saying what is now true
   ("feat(xpu/k1): Triton GDN tree step runs the serial chain bit for bit").
-- One topic per PR into `xpu/main`. In the description, link the B70 bundle (`results` path) for the head SHA and state
-  which invariance and perf numbers changed.
+- One topic per commit on `xpu/main`. When a commit changes kernels or exactness, record the B70 bundle (`results`
+  path) and the invariance and perf numbers that changed in the kernel card or `STATUS.md` once the run lands.
 - Never force-push shared branches (`main`, `xpu/main`, `results`). Never commit model weights, results bundles on code
   branches, `.so` builds, or secrets.
 
@@ -295,5 +296,5 @@ Open issues:
   `env`/`triton-smoke` suites instead of guessing.
 - A test fails on the B70 and you can't tell why: ask for a run with dumps (`TRITON_KERNEL_DUMP=1`,
   `IGC_ShaderDumpEnable=1`) via `.b70/run.yml`, and record findings in the kernel card.
-- A `DEVICE_LOST` or GPU wedge: stop that branch's runs, reproduce with a minimal kernel, and report it in `STATUS.md`.
+- A `DEVICE_LOST` or GPU wedge: stop pushing GPU work, reproduce with a minimal kernel, and report it in `STATUS.md`.
   Out-of-bounds bugs can wedge the box.
