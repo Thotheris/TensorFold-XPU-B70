@@ -1,0 +1,5 @@
+# Pass --constraint tools/xpu/constraints.txt to later pip installs.
+# torch must stay 2.14.x+xpu. Bootstrap records the installed wheel's exact version.
+torch==2.14.1+xpu
+# Recorded on the 5950x-server venv: torch 2.14.1+xpu requires triton-xpu~=3.8.0.
+triton-xpu==3.8.0

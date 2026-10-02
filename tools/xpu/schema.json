@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {"$ref": "#/$defs/env"},
+    {"$ref": "#/$defs/kernel"},
+    {"$ref": "#/$defs/e2e"}
+  ],
+  "$defs": {
+    "version": {"type": ["string", "null"]},
+    "nullable_number": {"type": ["number", "null"]},
+    "nullable_boolean": {"type": ["boolean", "null"]},
+    "env": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "kind", "torch", "torch_version_xpu", "triton", "dle", "icpx", "compute_runtime", "igc",
+        "level_zero", "kernel_release", "xe", "xpu_smi", "host_ram_gib", "swap_gib", "model_revisions",
+        "toolchain_hash", "dpas_flags", "data_ptr", "triton_add", "host_ram_shadow"
+      ],
+      "properties": {
+        "kind": {"const": "env"},
+        "torch": {"$ref": "#/$defs/version"},
+        "torch_version_xpu": {"$ref": "#/$defs/version"},
+        "triton": {"$ref": "#/$defs/version"},
+        "dle": {"$ref": "#/$defs/version"},
+        "icpx": {"$ref": "#/$defs/version"},
+        "compute_runtime": {"$ref": "#/$defs/version"},
+        "igc": {"$ref": "#/$defs/version"},
+        "level_zero": {"$ref": "#/$defs/version"},
+        "kernel_release": {"$ref": "#/$defs/version"},
+        "xe": {"$ref": "#/$defs/version"},
+        "xpu_smi": {"type": ["string", "object", "null"]},
+        "host_ram_gib": {"$ref": "#/$defs/nullable_number"},
+        "swap_gib": {"$ref": "#/$defs/nullable_number"},
+        "model_revisions": {"type": "object", "additionalProperties": true},
+        "toolchain_hash": {"type": "string"},
+        "dpas_flags": {"type": "object", "additionalProperties": true},
+        "data_ptr": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "raw": {"type": ["string", "null"]},
+            "high_bit": {"$ref": "#/$defs/nullable_boolean"}
+          }
+        },
+        "triton_add": {"type": "object", "additionalProperties": true},
+        "host_ram_shadow": {"type": "object", "additionalProperties": true}
+      }
+    },
+    "kernel": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "kind", "name", "median_us", "p10_us", "p90_us", "gbps", "tflops",
+        "pct_peak_gbps", "pct_peak_tflops", "bitwise_ok", "n_regs", "n_spills", "threads_per_warp", "dpas"
+      ],
+      "properties": {
+        "kind": {"const": "kernel"},
+        "name": {"type": "string"},
+        "median_us": {"type": "number"},
+        "p10_us": {"type": "number"},
+        "p90_us": {"type": "number"},
+        "gbps": {"type": "number"},
+        "tflops": {"type": "number"},
+        "pct_peak_gbps": {"type": "number"},
+        "pct_peak_tflops": {"type": "number"},
+        "bitwise_ok": {"$ref": "#/$defs/nullable_boolean"},
+        "n_regs": {"$ref": "#/$defs/nullable_number"},
+        "n_spills": {"$ref": "#/$defs/nullable_number"},
+        "threads_per_warp": {"$ref": "#/$defs/nullable_number"},
+        "dpas": {"$ref": "#/$defs/nullable_boolean"}
+      }
+    },
+    "e2e": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "name", "status", "tok_s", "ttft_s", "token_sha_match"],
+      "properties": {
+        "kind": {"const": "e2e"},
+        "name": {"type": "string"},
+        "status": {"enum": ["pass", "fail", "todo", "error"]},
+        "tok_s": {"$ref": "#/$defs/nullable_number"},
+        "ttft_s": {"$ref": "#/$defs/nullable_number"},
+        "token_sha_match": {"$ref": "#/$defs/nullable_boolean"}
+      }
+    }
+  }
+}

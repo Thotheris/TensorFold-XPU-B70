@@ -1,0 +1,11 @@
+[Unit]
+Description=TensorFold B70 branch runner
+
+[Service]
+Type=oneshot
+Environment=TF_XPU_PYTHON=%h/.local/share/tensorfold-xpu/venv/bin/python
+EnvironmentFile=-%h/.config/tensorfold-xpu/runner.env
+ExecStart=%h/.local/share/tensorfold-xpu/venv/bin/python %h/.local/share/tensorfold-xpu/repo/tools/xpu/b70_runner.py --once
+# Suite deadlines live in the runner. This is only a backstop for a wedged process.
+TimeoutStartSec=4h
+UMask=0077
