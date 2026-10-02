@@ -506,6 +506,28 @@ needs about 19 GB. Admission
   - Add `--drafter` support to `nemotron_h`'s XPU engine.
 - Gate: drafted == serial bitwise, and the acceptance and speed gain measured in the bundle.
 
+## WS10 — EXL3 on XPU (later, after P4)
+Full analysis and phases: [EXL3_PORT.md](EXL3_PORT.md).
+- **Why:** better quality per bit. 27B at 3–4 bpw is about 11–14 GB, which frees device and host RAM. Upstream already
+  has the EXL3 CUDA path, and the user's `exl3xpu-b70-lab` proves bit-exact codebook decode on B70 (M=1 ≈ 481 GB/s).
+- **Key constraint:** exl3xpu is deterministic but **not row-invariant**. It switches kernel and split-K by M and uses
+  oneDNN/int8 for prefill. The port keeps exl3xpu's decode (bit-exact W_q) and rebuilds the GEMM around TensorFold's
+  shape-only plan, fixed-order sums and fixed-tile prompt GEMM.
+- **Phases:**
+
+  | Phase | Work |
+  |---|---|
+  | E0 | prereqs (WS1/WS2/K0 with AOT+JIT validated) |
+  | E1 | loader gating (`exl3` for `qwen3_5` on XPU, `layout="stored"`) |
+  | E2 | bit-exact decode/reconstruct (port from exl3xpu, MIT attribution, no `-ffast-math`) |
+  | E3 | row-invariant ESIMD DPAS linear (fixed MB, shape-only split) |
+  | E4 | chunk-invariant prompt GEMM (Triton-XPU, then ESIMD) |
+  | E5 | recipe A-EXL3: `turboderp/Qwen3.8-27B-exl3` 3.00/4.00bpw + DFlash2 |
+  | E6 | optional EXL3 experts |
+
+- **Rule:** never push, open PRs or file issues to `0xSero/exl3xpu` (or `ashhart/TensorFold`). Learn from and copy
+  MIT code with attribution only.
+
 ---
 
 ## 8. Milestones and parallel schedule
@@ -519,6 +541,7 @@ needs about 19 GB. Admission
 | **P4 Perf and polish** | WS6 graphs, fusion, `--parallel`, docs | roofline targets; full bench bundle published |
 | **P5 Nemotron DFlash** | WS9 | drafted == serial; speedup reported |
 | **P6 Two GPUs** | WS7 | when the second B70 arrives |
+| **P7 EXL3** | WS10 (E0–E6, see EXL3_PORT.md) | A-EXL3: drafted == serial; row/chunk invariance; quality gate |
 
 ---
 

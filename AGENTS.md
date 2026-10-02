@@ -32,6 +32,7 @@ or compressed-tensors `pack-quantized`. MLX, EXL3, NVFP4 and FP8 are refused. Se
 | Triton kernels | [docs/xpu/TRITON_XPU_GUIDE.md](docs/xpu/TRITON_XPU_GUIDE.md) |
 | Native SYCL/ESIMD kernels, hardware, toolchain | [docs/xpu/B70_NATIVE_KERNEL_GUIDE.md](docs/xpu/B70_NATIVE_KERNEL_GUIDE.md) |
 | Checkpoint loading, weight layouts | [docs/xpu/QUANT_FORMATS.md](docs/xpu/QUANT_FORMATS.md) |
+| EXL3 on XPU (later, WS10) | [docs/xpu/EXL3_PORT.md](docs/xpu/EXL3_PORT.md) |
 | Current state, open problems | `docs/xpu/STATUS.md` (written by the Analyst; may not exist yet) |
 | A specific kernel | its card in `docs/xpu/kernels/<kernel>.md` |
 | How upstream adds a CUDA family | [docs/recipes/adding-a-cuda-family.md](docs/recipes/adding-a-cuda-family.md) |
@@ -178,7 +179,8 @@ Each role owns paths. Change only files your role owns. If you need a change els
   per branch; keep it small.
 - `results`: an orphan branch of result bundles. Never merge it anywhere.
 - `upstream` remote: `ashhart/TensorFold`. **Fetch only. Never push, open PRs or file issues there** unless the repo
-  owner explicitly says the work is ready. In every clone, disable it with
+  owner explicitly says the work is ready. The same applies to every other third-party project we learn from (for
+  example `0xSero/exl3xpu`): read and copy (with licence attribution), never push, PR or file issues. In every clone, disable it with
   `git remote set-url --push upstream DISABLED-do-not-push-to-upstream`. All pushes go to `origin`
   (`Thotheris/TensorFold-XPU-B70`). Upstream merges into this fork are the Integrator's job and go forward only.
 
