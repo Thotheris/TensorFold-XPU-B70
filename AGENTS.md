@@ -172,8 +172,9 @@ Each role owns paths. Change only files your role owns. If you need a change els
 
 ## 8. Branches and the B70 test loop
 
-- `main`: this fork's default branch. It holds docs, agent instructions and integrated work.
-- `xpu/main`: the integration trunk for port code. Only the Integrator merges here, and only after a green B70 bundle
+- `xpu/main`: **the fork's default branch.** Clone it, branch from it, and target every PR at it.
+- `main`: a milestone snapshot. The Integrator merges `xpu/main` into `main` at milestones; agents never target it.
+- `xpu/main` is also the integration trunk for port code. Only the Integrator merges here, and only after a green B70 bundle
   for the exact head SHA.
 - `xpu/<ws>/<topic>`: your work branch, cut from `xpu/main` (e.g. `xpu/k1/gdn-triton`, `xpu/infra/accel`). One topic
   per branch; keep it small.
@@ -183,6 +184,20 @@ Each role owns paths. Change only files your role owns. If you need a change els
   example `0xSero/exl3xpu`): read and copy (with licence attribution), never push, PR or file issues. In every clone, disable it with
   `git remote set-url --push upstream DISABLED-do-not-push-to-upstream`. All pushes go to `origin`
   (`Thotheris/TensorFold-XPU-B70`). Upstream merges into this fork are the Integrator's job and go forward only.
+
+**Fresh-clone setup (run once in every clone, before any `git push` or `gh` command):**
+```bash
+git checkout xpu/main
+git remote set-url --push upstream DISABLED-do-not-push-to-upstream   # if an upstream remote exists
+gh repo set-default Thotheris/TensorFold-XPU-B70                      # gh must never default to the parent repo
+```
+
+**Opening a PR:** always name the repo and base explicitly. In a fork, `gh` may otherwise target `ashhart/TensorFold`.
+```bash
+gh pr create --repo Thotheris/TensorFold-XPU-B70 --base xpu/main --head <your-branch>
+```
+Before submitting through the web UI, check that the base repository is `Thotheris/TensorFold-XPU-B70` and the base
+branch is `xpu/main`.
 
 **To get a hardware run**, commit `.b70/run.yml` on your branch and push:
 ```yaml
