@@ -5,7 +5,7 @@
 - GPTQ v1
 - compressed-tensors `pack-quantized`
 
-MLX, EXL3, NVFP4 and FP8 checkpoints are refused on XPU.
+EXL3 (trellis) checkpoints are also read, opt-in and recipe A only: see [EXL3.md](EXL3.md). MLX, NVFP4 and FP8 checkpoints are refused on XPU.
 
 Compiled 2026-09-30 from public sources. Download counts and repo contents change; re-check before relying on them.
 

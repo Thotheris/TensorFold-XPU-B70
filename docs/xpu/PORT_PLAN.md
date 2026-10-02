@@ -27,7 +27,7 @@ results to a `results` branch. Analyst agents read the results and file the next
 ### Target checkpoints (Intel-native W4A16, from the HF survey)
 
 Intel's B-series stack (AutoRound, vllm-xpu-kernels `int4_gemm_w4a16`, the XPU W4A16 MoE) is built around
-**symmetric INT4 weight-only, GPTQ layout**. **XPU targets only these formats**; MLX/EXL3/NVFP4 checkpoints are
+**symmetric INT4 weight-only, GPTQ layout**. **XPU targets only these formats**; MLX/NVFP4 checkpoints are (EXL3: opt-in, see EXL3.md)
 refused on `--backend xpu` (decision: no MLX parity path).
 
 | Recipe | Primary (perf target) | Secondary | Drafter |
@@ -163,7 +163,7 @@ Steps:
    - `cli.py:230-299`: generalize `_serve_cuda` to `_serve_torch(..., device)`, and fix the "on CUDA" log lines.
    - `families/__init__.py:129` `backends_of`: add `("xpu","xpu_engine")`. Lines 144-167 `require_readable`: XPU reads
      `auto-round`/`gptq`/`compressed-tensors(pack-quantized)` W4A16 sym (WS3b) **only**. Refuse
-     mlx/modelopt/NVFP4/EXL3/FP8 with a clear message.
+     mlx/modelopt/NVFP4/FP8 with a clear message.
    - `serve_options.py`: XPU refuses `--kv-dtype` (other than bf16), `--prefill-fp8`, `--tp 2` and `--decode-share`
      until supported.
 2. **Families.** In `qwen3_5/__init__.py` and `nemotron_h/__init__.py`, export

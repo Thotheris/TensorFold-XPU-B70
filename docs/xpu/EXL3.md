@@ -1,7 +1,7 @@
 # EXL3 on the XPU backend (survey, loader, kernels)
 
-Status: **proposal, not decided.** [AGENTS.md](../../AGENTS.md) §1 and [QUANT_FORMATS.md](QUANT_FORMATS.md) say EXL3 is refused on
-`--backend xpu`. Nothing below takes effect until the repo owner reverses that rule (§1). Every hardware fact here is
+Status: **approved in scope by the repo owner; no code yet.** The owner reversed the "EXL3 refused on XPU" rule; AGENTS.md,
+QUANT_FORMATS.md and PORT_PLAN.md now say EXL3 is opt-in (§1 records the remaining inputs). Every hardware fact here is
 `[UNVERIFIED]` until a B70 bundle says otherwise. No code was run for this document; it is read from the CUDA sources.
 
 Three parts, in the order they would be done: **§2 survey** (what exists), **§3 loader** (what to read), **§4 kernels**

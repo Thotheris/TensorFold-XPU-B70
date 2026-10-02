@@ -20,7 +20,7 @@ serially.
 | B | Nemotron 3.5 Lightning 30B-A3B | `letechlead/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-INT4-AutoRound` (g64, fp16 scales) | built-in MTP | `src/tensorfold/families/nemotron_h` |
 
 On XPU, TensorFold reads **only symmetric INT4 weight-only checkpoints**: AutoRound `auto_round:auto_gptq`, GPTQ v1,
-or compressed-tensors `pack-quantized`. MLX, EXL3, NVFP4 and FP8 are refused. See
+or compressed-tensors `pack-quantized`. EXL3 is also read (opt-in, recipe A, see [docs/xpu/EXL3.md](docs/xpu/EXL3.md)). MLX, NVFP4 and FP8 are refused. See
 [docs/xpu/QUANT_FORMATS.md](docs/xpu/QUANT_FORMATS.md).
 
 ## 2. Read these before starting your task
