@@ -5,7 +5,8 @@
 - GPTQ v1
 - compressed-tensors `pack-quantized`
 
-MLX, EXL3, NVFP4 and FP8 checkpoints are refused on XPU.
+MLX, EXL3, NVFP4 and FP8 checkpoints are refused on XPU. EXL3 support is planned later as WS10; see
+[EXL3_PORT.md](EXL3_PORT.md).
 
 Compiled 2026-09-30 from public sources. Download counts and repo contents change; re-check before relying on them.
 
