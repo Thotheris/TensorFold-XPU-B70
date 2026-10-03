@@ -1,0 +1,93 @@
+{
+  "kind": "kernel",
+  "name": "gdn",
+  "median_us": 125.31769999999999,
+  "p10_us": 124.23439999999998,
+  "p90_us": 126.83329999999998,
+  "gbps": 178.88869648900356,
+  "tflops": 0.6024485926569032,
+  "pct_peak_gbps": 29.42248297516506,
+  "pct_peak_tflops": 0.32920688123328046,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 448,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 10,
+  "repeats_checked": 20,
+  "status": "pass",
+  "shape": {
+    "rows": 12,
+    "slots": 3,
+    "slot_moves": 6,
+    "heads": [
+      16,
+      48
+    ],
+    "dv": 128,
+    "dk": 128
+  },
+  "bytes_model": "states read and written, slot writes and reads, window inputs and outputs",
+  "timing": "10 launches queued back to back per sample, per-launch mean",
+  "headline": "tree-w12",
+  "cases": [
+    {
+      "name": "gdn-tree-w1",
+      "median_us": 121.33339999999998,
+      "gbps": 26.199546044205473,
+      "pct_peak_gbps": 4.309135862533795,
+      "n_spills": 512,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "threads_per_warp": 32,
+      "bitwise_ok": true
+    },
+    {
+      "name": "gdn-tree-w4",
+      "median_us": 121.79169999999999,
+      "gbps": 26.917564990060903,
+      "pct_peak_gbps": 4.427231083891596,
+      "n_spills": 512,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "threads_per_warp": 32,
+      "bitwise_ok": true
+    },
+    {
+      "name": "gdn-tree-w12",
+      "median_us": 125.31769999999999,
+      "gbps": 178.88869648900356,
+      "pct_peak_gbps": 29.42248297516506,
+      "n_spills": 448,
+      "n_regs": 256,
+      "n_regs_source": "driver",
+      "threads_per_warp": 32,
+      "bitwise_ok": true
+    },
+    {
+      "name": "gdn-replay-48x4",
+      "median_us": 603.7864999999999,
+      "gbps": 500.16005326386073,
+      "pct_peak_gbps": 82.26316665524025,
+      "n_spills": 0,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "threads_per_warp": 32,
+      "bitwise_ok": true
+    },
+    {
+      "name": "gdn-chain-512",
+      "median_us": 1270.9948,
+      "gbps": 18.304779846463575,
+      "pct_peak_gbps": 3.0106545800104563,
+      "n_spills": 0,
+      "n_regs": 256,
+      "n_regs_source": "driver",
+      "threads_per_warp": 32,
+      "bitwise_ok": true
+    }
+  ]
+}

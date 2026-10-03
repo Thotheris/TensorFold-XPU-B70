@@ -1,0 +1,33 @@
+{
+  "kind": "kernel",
+  "name": "gdn-chain-512",
+  "median_us": 1270.9948,
+  "p10_us": 1270.3489,
+  "p90_us": 1279.4374999999998,
+  "gbps": 18.304779846463575,
+  "tflops": 2.5344127859531764,
+  "pct_peak_gbps": 3.0106545800104563,
+  "pct_peak_tflops": 1.3849250196465446,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 10,
+  "repeats_checked": 20,
+  "status": "pass",
+  "shape": {
+    "rows": 512,
+    "heads": [
+      16,
+      48
+    ],
+    "dv": 128,
+    "dk": 128
+  },
+  "bytes_model": "states read and written, slot writes and reads, window inputs and outputs",
+  "timing": "10 launches queued back to back per sample, per-launch mean"
+}

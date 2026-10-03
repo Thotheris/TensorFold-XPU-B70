@@ -1,0 +1,29 @@
+{
+  "kind": "kernel",
+  "name": "gdn-replay-48x4",
+  "median_us": 603.7864999999999,
+  "p10_us": 601.9896,
+  "p90_us": 604.8646,
+  "gbps": 500.16005326386073,
+  "tflops": 1.5004801597915822,
+  "pct_peak_gbps": 82.26316665524025,
+  "pct_peak_tflops": 0.8199345135473126,
+  "n_regs": 128,
+  "n_regs_source": "grf_mode",
+  "n_spills": 0,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 10,
+  "repeats_checked": 20,
+  "status": "pass",
+  "shape": {
+    "layers": 48,
+    "rows": 4,
+    "streams": 1
+  },
+  "bytes_model": "states read and written, slot writes and reads, window inputs and outputs",
+  "timing": "10 launches queued back to back per sample, per-launch mean"
+}

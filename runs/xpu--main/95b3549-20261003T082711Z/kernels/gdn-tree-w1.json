@@ -1,0 +1,35 @@
+{
+  "kind": "kernel",
+  "name": "gdn-tree-w1",
+  "median_us": 121.33339999999998,
+  "p10_us": 120.1511,
+  "p90_us": 124.29679999999999,
+  "gbps": 26.199546044205473,
+  "tflops": 0.051852630850202835,
+  "pct_peak_gbps": 4.309135862533795,
+  "pct_peak_tflops": 0.02833477095639499,
+  "n_regs": 128,
+  "n_regs_source": "grf_mode",
+  "n_spills": 512,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 10,
+  "repeats_checked": 20,
+  "status": "pass",
+  "shape": {
+    "rows": 1,
+    "slots": 0,
+    "slot_moves": 0,
+    "heads": [
+      16,
+      48
+    ],
+    "dv": 128,
+    "dk": 128
+  },
+  "bytes_model": "states read and written, slot writes and reads, window inputs and outputs",
+  "timing": "10 launches queued back to back per sample, per-launch mean"
+}
