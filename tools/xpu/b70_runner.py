@@ -890,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
                 (bundle / "logs" / filename).write_text(
                     str(_redact(source.read_text(encoding="utf-8"))), encoding="utf-8",
                 )
-        (bundle / "logs" / "runner.log").write_text(str(_redact("\n".join(logs))) + "\n", encoding="utf-8")
+        (bundle / "logs" / "runner.log").write_text(str(_redact("\n".join(logs))).rstrip() + "\n", encoding="utf-8")
         append_index(
             results_dir / "index.jsonl",
             {"branch": head.branch, "sha": head.sha, "sha7": sha7(head.sha), "time": utc.isoformat(),
@@ -906,7 +906,7 @@ def main(argv: list[str] | None = None) -> int:
             error = str(_redact(committed.stderr or committed.stdout or "results commit failed"))
             print(error, file=sys.stderr)
             logs.append(error)
-            (bundle / "logs" / "runner.log").write_text("\n".join(logs) + "\n", encoding="utf-8")
+            (bundle / "logs" / "runner.log").write_text("\n".join(logs).rstrip() + "\n", encoding="utf-8")
             identity = any(
                 marker in error.lower()
                 for marker in ("identity unknown", "unable to auto-detect email", "user.email", "tell me who you are")

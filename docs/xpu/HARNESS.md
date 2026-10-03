@@ -338,8 +338,9 @@ python3 tools/xpu/b70_runner.py --once --image tensorfold-xpu:tc-<hash12>
 This selects and publishes one pending head using the normal runner protocol. It mounts the harness read-only at
 `/harness`, code at `/src`, output at `/out`, the runner's Triton cache at `/cache/triton`, and `model_cache` from
 run.yml (or host `HF_HOME`) read-only at `/models`. GPU render groups are numeric; output files use the runner's
-UID/GID. Networking is disabled, HF runs offline, and only Intel Triton/IGC knobs are forwarded. Editable installation
-uses `--no-deps --no-build-isolation`, so setuptools is installed in the image and no build dependencies are fetched.
+UID/GID. Networking is disabled, HF runs offline, and only Intel Triton/IGC knobs are forwarded. Each suite creates a writable venv at `/tmp/tf-runtime`, with a `.pth` entry inheriting the pinned image packages.
+Editable installation uses `--no-deps --no-build-isolation` in that venv; the root-owned image venv stays read-only,
+setuptools comes from the image, and no build dependencies are fetched.
 On a suite deadline the host kills the named Docker container as well as its client process. Health checks, STOP
 handling, and results publication stay on the host.
 

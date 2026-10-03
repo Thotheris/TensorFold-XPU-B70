@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 __all__ = ["container_name", "docker_argv", "image_id", "render_gids", "runtime_versions"]
@@ -105,6 +106,19 @@ def runtime_versions() -> dict[str, str | None]:
     return versions
 
 
+def _suite_python(runtime: Path = Path("/tmp/tf-runtime")) -> Path:
+    """Each non-root suite installs into a writable venv that inherits the pinned image packages."""
+    python = runtime / "bin" / "python"
+    if Path(sys.prefix) == runtime:
+        return Path(sys.executable)
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(runtime)],
+                   text=True, capture_output=True, check=True)
+    library = runtime / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    library.mkdir(parents=True, exist_ok=True)
+    (library / "image-runtime.pth").write_text(sysconfig.get_path("purelib") + "\n", encoding="utf-8")
+    return python
+
+
 def main() -> int:
     """The trusted container worker emits the runner's JSON protocol on stdout."""
     if sys.argv[1:] == ["versions"]:
@@ -112,6 +126,10 @@ def main() -> int:
         return 0
     if sys.argv[1:] != ["suite"]:
         return 2
+    python = _suite_python()
+    if python != Path(sys.executable):
+        os.environ["PATH"] = str(python.parent) + os.pathsep + os.environ.get("PATH", "")
+        os.execv(str(python), [str(python), "-m", "tools.xpu.container", "suite"])
     from .suites import run_suite
 
     request = json.load(sys.stdin)

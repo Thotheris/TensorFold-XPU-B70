@@ -221,7 +221,7 @@ def test_runner_image_selects_container_without_host_install(mode, tmp_path, mon
     def suite(name, **kwargs):
         assert bool(kwargs.get("container")) == (mode == "container")
         seen["suites"].append(name)
-        return runner.SuiteResult(name, "pass", "", {}, "")
+        return runner.SuiteResult(name, "pass", "", {}, "probe\n\n")
 
     monkeypatch.setattr(runner, "run_git", git)
     monkeypatch.setattr(runner, "run_cmd", command)
@@ -238,6 +238,7 @@ def test_runner_image_selects_container_without_host_install(mode, tmp_path, mon
     assert seen["suites"] == ["env", "unit-host"] and seen["push"]
     env_doc = json.loads(next(results.glob("runs/*/*/env.json")).read_text())
     assert env_doc["image"] == (IMAGE if mode == "container" else None)
+    assert not next(results.glob("runs/*/*/logs/runner.log")).read_text().endswith("\n\n")
 
 
 def test_host_only_keeps_mlx_sources_and_filters_test_dependencies(tmp_path):
@@ -261,3 +262,22 @@ def test_persistent_venv_fallback_is_consumed_once(tmp_path):
     assert runner._container_mode("image:test", None, tmp_path, "c" * 40)
     assert not runner._container_mode("image:test", "venv", tmp_path, "d" * 40)
     assert not runner._container_mode(None, None, tmp_path, "e" * 40)
+
+
+def test_suite_python_uses_writable_venv_and_image_packages(tmp_path, monkeypatch):
+    import sys
+    import sysconfig
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: calls.append((argv, kwargs)))
+    runtime = tmp_path / "runtime"
+    python = container._suite_python(runtime)
+    assert python == runtime / "bin/python"
+    assert calls[0][0] == [sys.executable, "-m", "venv", "--without-pip", str(runtime)]
+    assert calls[0][1]["check"] is True
+    assert next(runtime.glob("lib/python*/site-packages/image-runtime.pth")).read_text().strip() == (
+        sysconfig.get_path("purelib")
+    )
+    monkeypatch.setattr(sys, "prefix", str(runtime))
+    assert container._suite_python(runtime) == Path(sys.executable)
+    assert len(calls) == 1
