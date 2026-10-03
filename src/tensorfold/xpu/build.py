@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -12,7 +13,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-__all__ = ["AOT_TARGET", "EXTENSIONS", "build_aot", "ext_dir", "load", "manifest_errors", "sycl_flags"]
+__all__ = ["AOT_TARGET", "EXTENSIONS", "build_aot", "ext_dir", "load", "manifest_errors", "source_hashes",
+           "sycl_flags"]
 
 HERE = Path(__file__).parent
 AOT_TARGET = "intel_gpu_bmg_g31"
@@ -34,6 +36,12 @@ def sycl_flags(mode: str, *, esimd: bool = False) -> list[str]:
     if esimd and mode == "aot":
         flags.append(f"-Xsycl-target-backend={AOT_TARGET} \"-options -vc-codegen\"")
     return flags
+
+
+def source_hashes(name: str) -> dict[str, str]:
+    """sha256 of each of ``name``'s sources as installed: a prebuilt library must come from exactly these."""
+
+    return {s: hashlib.sha256((HERE / s).read_bytes()).hexdigest() for s in EXTENSIONS[name]["sources"]}
 
 
 def _dpas_in_dump(directory: Path) -> bool | None:
@@ -65,7 +73,7 @@ def build_aot(output_dir: Path, names: list[str] | None = None, modes: tuple[str
     output_dir = Path(output_dir)
     report: dict[str, Any] = {}
     for name in names or list(EXTENSIONS):
-        entry: dict[str, Any] = {"mode": None, "errors": {}, "igc_dpas": None}
+        entry: dict[str, Any] = {"mode": None, "errors": {}, "igc_dpas": None, "sources": source_hashes(name)}
         for mode in modes:
             work = output_dir / "work" / f"{name}-{mode}"
             dump = output_dir / "igc" / f"{name}-{mode}"
@@ -129,6 +137,12 @@ def load(name: str) -> Any:
     path = directory / f"{name}.so"
     if not path.is_file():
         raise RuntimeError(f"{path} is missing; rebuild the extensions for this source")
+    try:
+        built = json.loads((directory / "build.json").read_text(encoding="utf-8"))[name]["sources"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise RuntimeError(f"{directory}/build.json does not record {name}'s sources; rebuild") from None
+    if built != source_hashes(name):
+        raise RuntimeError(f"{path} was built from other sources than the installed {name}; rebuild the extensions")
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

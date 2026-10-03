@@ -69,3 +69,18 @@ def test_every_native_source_is_package_data():
     for spec in build.EXTENSIONS.values():
         for source in spec["sources"]:
             assert (Path(build.__file__).parent / source).is_file(), source
+
+
+def test_load_refuses_a_library_built_from_other_sources(monkeypatch, tmp_path: Path):
+    torch = pytest.importorskip("torch")
+    name = "tensorfold_xpu_hello_v1"
+    manifest = {"torch": str(torch.__version__), "sycl": str(torch.version.xpu)}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / f"{name}.so").write_bytes(b"not a library")
+    stale = {s: "0" * 64 for s in build.EXTENSIONS[name]["sources"]}
+    (tmp_path / "build.json").write_text(json.dumps({name: {"sources": stale}}), encoding="utf-8")
+    monkeypatch.setenv("TF_XPU_EXT_DIR", str(tmp_path))
+    build.load.cache_clear()
+    with pytest.raises(RuntimeError, match="other sources"):
+        build.load(name)
+    assert set(build.source_hashes(name)) == set(build.EXTENSIONS[name]["sources"])
