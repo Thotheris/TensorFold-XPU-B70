@@ -10,7 +10,7 @@ from tensorfold.xpu.kernels.gdn import _halving_sum
 
 __all__ = ["ROWS", "scan_rows"]
 
-ROWS = 8           # value rows a program steps; the step's bits never depend on it
+ROWS = 4           # value rows a program steps; the step's bits never depend on it (B70 sweep: fastest)
 DS = 128
 
 

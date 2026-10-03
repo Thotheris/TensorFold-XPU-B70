@@ -159,5 +159,11 @@ Removing launches (no separate reduce, shared group sums, cached launches or gra
   further (bounded pass).
 - `qmm_fast.rows` and `matmul_rows` assume tiled CUDA weights; add stored-SYM/BF16 row-selection adapters before WS5
   (STEP 4), with contiguous/disjoint/boundary-span equality against full-head slices. Reject `matmul_partial` on XPU.
-- The SYM contract computes `P*s - 8*s*xs`, which cancels when `q` sits near 8; the fp64 tolerance (2^-7 of the max)
-  passes, but the A/B against `dot(x, q - 8) * s` is still open.
+- Closed (2026-10-03, dev A/B on the B70, 1024 x 5120 g128, 16 rows): the cancellation in `P*s - 8*s*xs` is real but
+  negligible. Worst fp32 relative error against fp64: 3.2e-6 for nibbles clustered at 7-9 with activation mean 1-4,
+  against 2.3e-7 for `dot(x, q - 8) * s`; both are about 1000x below the bf16 output rounding (2^-9). The contract
+  stays as is (CUDA's and the native plan's).
+- Launch overhead, part fixed: `xpu/kernels/launch.py::Launcher` calls the compiled kernel's `run` after the first
+  JIT dispatch (the key covers dtypes, 16-byte alignment and int value / divisibility / width). A split-K call's host
+  time went from about 97 us to 71 us (dev). The rest is the driver's launch (~16 us each), two allocations and the
+  wrapper's checks; fewer launches (fused reduce, graphs) is WS6.

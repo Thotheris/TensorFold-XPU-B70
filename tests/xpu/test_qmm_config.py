@@ -60,3 +60,16 @@ def test_every_shape_gets_a_whole_split_and_whole_sub_dots(n, k, gs):
     assert (k // (gs or 64)) % sk == 0 and cfg.bm in (16, 32, 64, 128) and cfg.bn in (16, 32, 64, 128)
     if gs:
         assert gs % cfg.ksplit == 0 and (gs // cfg.ksplit) % 16 == 0       # each sub-dot is whole DPAS K steps
+
+
+def test_launch_key_covers_what_triton_specialises_on():
+    torch = pytest.importorskip("torch")
+    from tensorfold.xpu.kernels.launch import _spec
+
+    base = torch.zeros(64, dtype=torch.bfloat16)
+    assert _spec(base) == (torch.bfloat16, True) and _spec(base[1:]) == (torch.bfloat16, False)   # 2-byte offset
+    assert _spec(base.float()) != _spec(base)
+    assert _spec(1) != _spec(2) and _spec(16) != _spec(17) and _spec(2**31) != _spec(2**31 - 16)
+    assert _spec(True) != _spec(1) and _spec(0.5) == _spec(2.0)
+    with pytest.raises(TypeError):
+        _spec(None)

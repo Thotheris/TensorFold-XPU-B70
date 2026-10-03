@@ -8,6 +8,8 @@ import torch
 import triton
 import triton.language as tl
 
+from ..launch import Launcher
+
 __all__ = ["PREFILL_TILE", "TILE", "Plan", "decode", "max_items", "pack_xpu", "plan", "prompt"]
 
 TILE = 16                # pairs an item holds in decode: the rows of one DPAS tile
@@ -152,7 +154,10 @@ def _prompt(X, x_stride, slots, W, S, ITEMS, MEMBERS, OUT, N, K,
             tl.store(dst, acc, mask=mask)
 
 
-def _run(kernel, launch: dict, x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, *,
+_LAUNCHERS = {"decode": Launcher(lambda: _decode), "prompt": Launcher(lambda: _prompt)}
+
+
+def _run(kernel: str, launch: dict, x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, *,
          from_tokens: bool, gs: int, epi: int, out: torch.Tensor | None) -> torch.Tensor:
     if x.dtype != torch.bfloat16 or x.dim() != 2 or x.stride(1) != 1:
         raise ValueError("experts: x must be 2-D bf16 rows with unit column stride")
@@ -164,9 +169,9 @@ def _run(kernel, launch: dict, x: torch.Tensor, words: torch.Tensor, scales: tor
     dtype = torch.float32 if epi == EPI_FP32 else torch.bfloat16
     out = torch.empty((pairs, n), dtype=dtype, device=x.device) if out is None else out
     grid = (p.items.shape[0], triton.cdiv(n, launch["bn"]))
-    kernel[grid](x, x.stride(0), p.slots if from_tokens else 0, words, scales, p.items, p.members, out, n, k, GS=gs,
-                 BN=launch["bn"], T=p.tile, EPI=epi, num_warps=launch["num_warps"], num_stages=launch["num_stages"],
-                 enable_fp_fusion=False)
+    _LAUNCHERS[kernel](grid, x, x.stride(0), p.slots if from_tokens else 0, words, scales, p.items, p.members, out, n,
+                       k, GS=gs, BN=launch["bn"], T=p.tile, EPI=epi, num_warps=launch["num_warps"],
+                       num_stages=launch["num_stages"], enable_fp_fusion=False)
     return out
 
 
@@ -176,7 +181,7 @@ def decode(x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, 
 
     if p.tile != TILE:
         raise ValueError(f"decode takes a plan of {TILE}-pair items")
-    return _run(_decode, DECODE, x, words, scales, p, from_tokens=from_tokens, gs=gs, epi=epi, out=out)
+    return _run("decode", DECODE, x, words, scales, p, from_tokens=from_tokens, gs=gs, epi=epi, out=out)
 
 
 def prompt(x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, *, from_tokens: bool, gs: int,
@@ -185,4 +190,4 @@ def prompt(x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, 
 
     if p.tile != PREFILL_TILE:
         raise ValueError(f"prompt takes a plan of {PREFILL_TILE}-pair items")
-    return _run(_prompt, PROMPT, x, words, scales, p, from_tokens=from_tokens, gs=gs, epi=epi, out=out)
+    return _run("prompt", PROMPT, x, words, scales, p, from_tokens=from_tokens, gs=gs, epi=epi, out=out)

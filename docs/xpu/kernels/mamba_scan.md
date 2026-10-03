@@ -47,5 +47,6 @@ R = 8 rows a program.
 |---|---|---|
 | 1024-row chunk, 64 heads x 64 x 128 | 4127.5 | about 4.0 us |
 
-Latency-bound (sequential steps, 512 programs). A chunked (SSD) form would change the arithmetic contract and needs
+Latency-bound (sequential steps). R = 4 rows a program (1024 programs) is about 28% faster than R = 8 in a dev sweep
+with equal bits; `num_stages` gave no consistent gain. A chunked (SSD) form would change the arithmetic contract and needs
 its own card; 23 Mamba layers x 4.1 ms is about 95 ms a 1024-token chunk.

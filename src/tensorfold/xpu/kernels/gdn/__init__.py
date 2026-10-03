@@ -8,10 +8,12 @@ import torch
 import triton
 import triton.language as tl
 
+from ..launch import Launcher
+
 __all__ = ["DK", "ROWS", "chain", "replay", "tree"]
 
 DK = 128
-ROWS = 8           # value rows a program steps; the step's bits never depend on it
+ROWS = 4           # value rows a program steps; the step's bits never depend on it (B70 sweep: fastest, no spills)
 WARPS = 1
 
 
@@ -118,6 +120,10 @@ def _replay(K, V, G, BETA, STATES, OUT, ROWS_, COUNTS, row_stride, count_stride,
     tl.store(OUT + state_rows[:, None] * 128 + dk[None, :], s, mask=mask)
 
 
+_LAUNCH_TREE = Launcher(lambda: _tree)
+_LAUNCH_REPLAY = Launcher(lambda: _replay)
+
+
 def _check_window(q, k, v, g, beta) -> tuple[int, int, int, int]:
     if q.dim() != 3 or q.shape[2] != DK or k.shape != q.shape or q.dtype != k.dtype:
         raise ValueError("q and k are (W, Hk, 128) of one dtype")
@@ -180,10 +186,10 @@ def tree(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, g: torch.Tensor, bet
     else:
         fstack, findex = stack, index
     grid = (triton.cdiv(dv, ROWS), hv, streams)
-    _tree[grid](q, k, v, g, beta, stack, index, plan.starts, plan.entries, slots, y, fstack, findex, *pargs,
-                HK=hk, HV=hv, DV=dv, NSLOTS=max(plan.slots, 1), R=ROWS, CHAIN=chain_mode,
-                HAS_PENDING=pending is not None, HAS_FINAL=final is not None, num_warps=WARPS,
-                enable_fp_fusion=False)
+    _LAUNCH_TREE(grid, q, k, v, g, beta, stack, index, plan.starts, plan.entries, slots, y, fstack, findex, *pargs,
+                 HK=hk, HV=hv, DV=dv, NSLOTS=max(plan.slots, 1), R=ROWS, CHAIN=chain_mode,
+                 HAS_PENDING=pending is not None, HAS_FINAL=final is not None, num_warps=WARPS,
+                 enable_fp_fusion=False)
     return y
 
 
@@ -229,6 +235,6 @@ def replay(k: torch.Tensor, v: torch.Tensor, g: torch.Tensor, beta: torch.Tensor
     streams = states.shape[0]
     out = states if in_place else torch.empty_like(states)
     grid = (triton.cdiv(dv, ROWS), hv, streams * layers)
-    _replay[grid](k, v, g, beta, states, out, rows, counts, rows.stride(0), counts.stride(0), w, layers,
-                  HK=hk, HV=hv, DV=dv, R=ROWS, num_warps=WARPS, enable_fp_fusion=False)
+    _LAUNCH_REPLAY(grid, k, v, g, beta, states, out, rows, counts, rows.stride(0), counts.stride(0), w, layers,
+                   HK=hk, HV=hv, DV=dv, R=ROWS, num_warps=WARPS, enable_fp_fusion=False)
     return None if in_place else out

@@ -6,6 +6,7 @@ import torch
 import triton
 import triton.language as tl
 
+from ..launch import Launcher
 from .config import LaneConfig, lane_config, slices, split_k
 
 __all__ = ["sym_matmul"]
@@ -63,7 +64,7 @@ def _qmm_sym(X, XS, W, S, OUT, PART, M, N, K, ldx,
         tl.store(PART + (pid_s * M + rm[:, None]) * N + rn[None, :], acc, mask=out_mask)
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["total"])
 def _reduce(PART, OUT, total, SK: tl.constexpr, BLOCK: tl.constexpr, F32: tl.constexpr):
     """OUT = part[0] + part[1] + ... in ascending slice order, rounded to bf16 unless F32."""
 
@@ -76,6 +77,10 @@ def _reduce(PART, OUT, total, SK: tl.constexpr, BLOCK: tl.constexpr, F32: tl.con
         tl.store(OUT + offs, acc, mask=ok)
     else:
         tl.store(OUT + offs, acc.to(tl.bfloat16), mask=ok)
+
+
+_LAUNCH_QMM = Launcher(lambda: _qmm_sym)
+_LAUNCH_REDUCE = Launcher(lambda: _reduce)
 
 
 def sym_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, xs: torch.Tensor, *, gs: int,
@@ -108,12 +113,12 @@ def sym_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, xs: 
     out = torch.empty((m, n), dtype=torch.float32 if f32 else torch.bfloat16, device=x.device)
     part = out if sk == 1 else torch.empty((sk, m, n), dtype=torch.float32, device=x.device)
     grid = (triton.cdiv(m, bm), triton.cdiv(n, cfg.bn), sk)
-    _qmm_sym[grid](x, xs, weight, scales, out, part, m, n, k, x.stride(0), GS=gs, SK=sk, PER=(k // gs) // sk, BM=bm,
+    _LAUNCH_QMM(grid, x, xs, weight, scales, out, part, m, n, k, x.stride(0), GS=gs, SK=sk, PER=(k // gs) // sk, BM=bm,
                    BLOCK_N=cfg.bn, F32=f32, KSPLIT=cfg.ksplit, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
                    grf_mode=cfg.grf_mode, enable_fp_fusion=False)
     if sk > 1:
         total = m * n
         block = 1024
-        _reduce[(triton.cdiv(total, block),)](part, out, total, SK=sk, BLOCK=block, F32=f32, num_warps=4,
-                                              enable_fp_fusion=False)
+        _LAUNCH_REDUCE((triton.cdiv(total, block),), part, out, total, SK=sk, BLOCK=block, F32=f32, num_warps=4,
+                       enable_fp_fusion=False)
     return out

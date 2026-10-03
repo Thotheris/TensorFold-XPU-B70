@@ -6,8 +6,9 @@ import torch
 import triton
 import triton.language as tl
 
+from ..launch import Launcher
 from .config import BK, LaneConfig, lane_config, slices, split_k
-from .lane import _reduce
+from .lane import _LAUNCH_REDUCE
 
 __all__ = ["bf16_matmul"]
 
@@ -41,6 +42,9 @@ def _gemv(X, W, OUT, PART, M, N, K, ldx,
         tl.store(PART + (pid_s * M + rm[:, None]) * N + rn[None, :], acc, mask=out_mask)
 
 
+_LAUNCH_GEMV = Launcher(lambda: _gemv)
+
+
 def bf16_matmul(x: torch.Tensor, weight: torch.Tensor, *, sk: int | None = None, bm: int | None = None,
                 f32: bool = False, config: LaneConfig | None = None) -> torch.Tensor:
     """x (M, K) bf16 times the bf16 ``weight`` (N, K) transposed -> (M, N) bf16; a row's bits never depend on M."""
@@ -63,12 +67,12 @@ def bf16_matmul(x: torch.Tensor, weight: torch.Tensor, *, sk: int | None = None,
     out = torch.empty((m, n), dtype=torch.float32 if f32 else torch.bfloat16, device=x.device)
     part = out if sk == 1 else torch.empty((sk, m, n), dtype=torch.float32, device=x.device)
     grid = (triton.cdiv(m, bm), triton.cdiv(n, cfg.bn), sk)
-    _gemv[grid](x, weight, out, part, m, n, k, x.stride(0), SK=sk, PER=(k // BK) // sk, BM=bm, BLOCK_N=cfg.bn,
+    _LAUNCH_GEMV(grid, x, weight, out, part, m, n, k, x.stride(0), SK=sk, PER=(k // BK) // sk, BM=bm, BLOCK_N=cfg.bn,
                 BLOCK_K=BK, F32=f32, num_warps=cfg.num_warps, num_stages=cfg.num_stages, grf_mode=cfg.grf_mode,
                 enable_fp_fusion=False)
     if sk > 1:
         total = m * n
         block = 1024
-        _reduce[(triton.cdiv(total, block),)](part, out, total, SK=sk, BLOCK=block, F32=f32, num_warps=4,
-                                              enable_fp_fusion=False)
+        _LAUNCH_REDUCE((triton.cdiv(total, block),), part, out, total, SK=sk, BLOCK=block, F32=f32, num_warps=4,
+                       enable_fp_fusion=False)
     return out

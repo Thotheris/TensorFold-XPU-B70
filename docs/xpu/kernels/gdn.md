@@ -89,7 +89,8 @@ The 1- and 4-row trees sit on the host-submission floor (~120 us, see the qmm ca
 ## Open issues
 
 - The explicit halving tree costs reshapes per step; measure against `tl.sum` (which is not pinned) at T1.
-- The tree kernel spills 448-512 bytes; T1 candidates: R = 4, 2 warps, grf_mode 256 (R and warps change no bits).
+- Fixed (dev sweep, bits equal for every R x warps): R = 4 rows a program, 1 warp: tree spills 0, the 512-row chain
+  about 23% faster (1328 -> 1019 us device), replay unchanged. Launches go through `xpu/kernels/launch.py`.
 - The prompt chain is about 2.5 us a step; a chunked (WY / UT) form would change the arithmetic contract, so it needs
   its own card and tests (prompt need not equal verify, but must stay chunk-invariant).
 - K1.N0 (SYCL, SG16 x 8 strided floats) is not started; T0 is stable, so it waits for K0-based N0 work.
