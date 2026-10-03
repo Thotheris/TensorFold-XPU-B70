@@ -70,7 +70,7 @@ def run_benchmark(name: str, out_dir: Path) -> dict:
         k = torch.randn(prefix + rows, kv_heads, dim, generator=gen, device="xpu").bfloat16()
         v = torch.randn(prefix + rows, kv_heads, dim, generator=gen, device="xpu").bfloat16()
         output = torch.empty_like(q)
-        kernel_name = "_attend"
+        kernel_name = "_attend_desc" if module.XPU_LAUNCH[dim]["desc"] else "_attend"
 
         def launch():
             return (module.triton_attention(q, k, v, prefix, scale=dim ** -0.5, out=output),)

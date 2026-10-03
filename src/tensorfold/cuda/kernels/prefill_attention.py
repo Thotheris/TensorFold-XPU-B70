@@ -11,9 +11,11 @@ import triton.language as tl
 
 BM = 64
 BN = 64
-# XPU launches by head dim (shape-only; every tile choice gave the same bits in a B70 sweep, docs/xpu/STATUS.md)
-XPU_LAUNCH = {64: {"num_warps": 8, "num_stages": 2}, 128: {"num_warps": 8, "num_stages": 1},
-              256: {"num_warps": 8, "num_stages": 1, "grf_mode": "256"}}
+# XPU launches by head dim (shape-only; every tile choice and the descriptor kernel gave the same bits on the B70):
+# D=128 and 256 take tensor descriptors (2D block loads), D=64 the pointer kernel
+XPU_LAUNCH = {64: {"bm": BM, "desc": False, "num_warps": 8, "num_stages": 2},
+              128: {"bm": 128, "desc": True, "num_warps": 16, "num_stages": 1, "grf_mode": "256"},
+              256: {"bm": 64, "desc": True, "num_warps": 8, "num_stages": 1}}
 
 
 @triton.jit
@@ -62,6 +64,40 @@ def _attend(Q, K, V, OUT, p0, W, H: tl.constexpr, HK: tl.constexpr, D: tl.conste
     tl.store(OUT + (rows[:, None] * H + head) * D + d[None, :], out.to(tl.bfloat16), mask=ok[:, None])
 
 
+@triton.jit(do_not_specialize=["p0", "W", "S"])
+def _attend_desc(Q, K, V, OUT, p0, W, S, H: tl.constexpr, HK: tl.constexpr, D: tl.constexpr, BM: tl.constexpr,
+                 BN: tl.constexpr, SCALE: tl.constexpr):
+    """``_attend`` with q, K, V and the output through tensor descriptors (XPU 2D block IO): the same tiles and bits."""
+
+    block = tl.program_id(0)
+    head = tl.program_id(1)
+    hk = head // (H // HK)
+    qd = tl.make_tensor_descriptor(Q + head * D, shape=[W, D], strides=[H * D, 1], block_shape=[BM, D])
+    kd = tl.make_tensor_descriptor(K + hk * D, shape=[S, D], strides=[HK * D, 1], block_shape=[BN, D])
+    vd = tl.make_tensor_descriptor(V + hk * D, shape=[S, D], strides=[HK * D, 1], block_shape=[BN, D])
+    pos = p0 + block * BM + tl.arange(0, BM)
+    q = qd.load([block * BM, 0])
+    m = tl.full((BM,), float("-inf"), tl.float32)
+    den = tl.zeros((BM,), tl.float32)
+    o = tl.zeros((BM, D), tl.float32)
+    first_pos = p0 + block * BM
+    last_pos = p0 + tl.minimum(block * BM + BM, W) - 1
+    full = (first_pos + 1) // BN
+    for t in range(0, full):
+        keys = t * BN + tl.arange(0, BN)
+        k = kd.load([t * BN, 0])
+        v = vd.load([t * BN, 0])
+        m, den, o = _tile(q, k, v, m, den, o, keys[None, :] <= pos[:, None], SCALE)
+    for t in range(full, last_pos // BN + 1):
+        keys = t * BN + tl.arange(0, BN)
+        seen = (keys <= last_pos)[:, None]
+        k = tl.where(seen, kd.load([t * BN, 0]), 0.0)
+        v = tl.where(seen, vd.load([t * BN, 0]), 0.0)
+        m, den, o = _tile(q, k, v, m, den, o, keys[None, :] <= pos[:, None], SCALE)
+    od = tl.make_tensor_descriptor(OUT + head * D, shape=[W, D], strides=[H * D, 1], block_shape=[BM, D])
+    od.store([block * BM, 0], (o / den[:, None]).to(tl.bfloat16))
+
+
 def attention(q: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, p0: int, *, scale: float) -> torch.Tensor:
     """q (W, H, D) bf16 at positions [p0, p0 + W); the caches must already hold every key through p0 + W - 1."""
 
@@ -82,11 +118,17 @@ def triton_attention(q: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tens
     hk = _check(q, k_cache, v_cache, p0)
     out = torch.empty_like(q) if out is None else out
     if q.device.type == "xpu":
-        launch = {**XPU_LAUNCH[d], "enable_fp_fusion": False}
-    else:
-        launch = {"num_warps": 8, "num_stages": 1 if d > 128 else 2}
+        cfg = dict(XPU_LAUNCH[d])
+        bm, desc = cfg.pop("bm"), cfg.pop("desc")
+        if desc:
+            _attend_desc[(triton.cdiv(w, bm), h)](q, k_cache, v_cache, out, p0, w, k_cache.shape[0], H=h, HK=hk, D=d,
+                                                  BM=bm, BN=BN, SCALE=scale, enable_fp_fusion=False, **cfg)
+            return out
+        _attend[(triton.cdiv(w, bm), h)](q, k_cache, v_cache, out, p0, w, H=h, HK=hk, D=d, BM=bm, BN=BN, SCALE=scale,
+                                         enable_fp_fusion=False, **cfg)
+        return out
     _attend[(triton.cdiv(w, BM), h)](q, k_cache, v_cache, out, p0, w, H=h, HK=hk, D=d, BM=BM, BN=BN, SCALE=scale,
-                                     **launch)
+                                     num_warps=8, num_stages=1 if d > 128 else 2)
     return out
 
 

@@ -49,3 +49,23 @@ def test_cuda_prompt_attention_rows_do_not_depend_on_chunking(heads, kv_heads, d
     for size in (1, 15, 16, 17, 64, 100, 512):
         parts = [attend(q[a:a + size].contiguous(), k, v, p0 + a, scale=dim ** -0.5) for a in range(0, total, size)]
         assert torch.equal(whole.view(torch.int16), torch.cat(parts).view(torch.int16)), size
+
+
+@pytest.mark.skipif(DEV != "xpu", reason="the XPU descriptor kernel")
+@pytest.mark.parametrize("heads,kv_heads,dim", SHAPES)
+def test_xpu_descriptor_kernel_has_the_pointer_kernels_bits(heads, kv_heads, dim, DEV):
+    """XPU's tensor-descriptor prompt attention gives ``_attend``'s bits at every depth, offset and tail."""
+
+    import triton
+
+    from tensorfold.cuda.kernels import prefill_attention as P
+
+    gen = torch.Generator(device=DEV).manual_seed(heads + dim)
+    k, v = _caches(gen, 4433, kv_heads, dim)
+    for p0, w in CHUNKS:
+        q = torch.randn((w, heads, dim), generator=gen, device=DEV).bfloat16()
+        want = torch.empty_like(q)
+        P._attend[(triton.cdiv(w, P.BM), heads)](q, k, v, want, p0, w, H=heads, HK=kv_heads, D=dim, BM=P.BM, BN=P.BN,
+                                                 SCALE=dim ** -0.5, num_warps=8, num_stages=1, enable_fp_fusion=False)
+        got = triton_attention(q, k, v, p0, scale=dim ** -0.5)
+        assert torch.equal(got.view(torch.int16), want.view(torch.int16)), (p0, w)
