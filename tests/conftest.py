@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
+from pathlib import Path
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # fp32 matmuls in fp32 on M5-generation GPUs, as GLM-5.3-Flash serves (its MLX_ENV); MLX reads this once a process
 os.environ.setdefault("MLX_ENABLE_TF32", "0")
@@ -28,10 +34,21 @@ def _tensor_units() -> bool:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "torch: needs PyTorch (the CUDA backend's code); skipped where it isn't installed")
+    config.addinivalue_line(
+        "markers", "torch: needs PyTorch (the CUDA backend's code); skipped where it isn't installed",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--host-only"):
+        mlx_defaults = {
+            "test_context_override_cannot_exceed_model_window",
+            "test_every_family_names_an_importable_kernel_version",
+            "test_serve_finishes_a_config_only_cache_before_loading",
+        }
+        for item in items:
+            if item.path.name == "test_hub_and_checks.py" and item.name in mlx_defaults:
+                item.add_marker(pytest.mark.skip(reason="assumes MLX family kernels or the macOS default backend"))
     if importlib.util.find_spec("torch") is None:
         no_torch = pytest.mark.skip(reason="needs PyTorch (the CUDA backend's code)")
         for item in items:
@@ -43,3 +60,20 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if item.path.name in TENSOR_UNIT_TESTS:
             item.add_marker(skip)
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption("--host-only", action="store_true", help="Exclude MLX test modules and their test dependents")
+
+
+def pytest_ignore_collect(collection_path, config: pytest.Config) -> bool | None:
+    """The host suite retains MLX sources but does not import MLX test modules."""
+    if config.getoption("--host-only"):
+        if collection_path.name == "cuda" and collection_path.is_dir():
+            return True
+        if collection_path.suffix == ".py":
+            from tools.xpu.host_tests import mlx_modules
+
+            if collection_path.resolve() in mlx_modules(Path(__file__).parent.resolve()):
+                return True
+    return None

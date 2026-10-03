@@ -1,0 +1,3 @@
+suites: [env, unit-host]
+baseline: xpu/main
+timeout_min: 90

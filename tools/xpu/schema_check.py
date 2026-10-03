@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ _TYPES = {"null", "boolean", "object", "array", "number", "integer", "string"}
 
 def _check_schema(schema: Any) -> None:
     if not isinstance(schema, dict):
-        raise RuntimeError("schema nodes must be objects")
+        raise RuntimeError("schema nodes must be objects")  # noqa: TRY004 - malformed schemas are runtime errors
     unknown = set(schema) - _KEYWORDS
     if unknown:
         raise RuntimeError(f"unsupported schema keywords: {', '.join(sorted(unknown))}")
@@ -32,7 +33,7 @@ def _check_schema(schema: Any) -> None:
     if isinstance(additional, dict):
         _check_schema(additional)
     elif not isinstance(additional, bool):
-        raise RuntimeError("additionalProperties must be a boolean or schema")
+        raise RuntimeError("additionalProperties must be a boolean or schema")  # noqa: TRY004
 
 
 def _matches_type(value: Any, kind: str) -> bool:
@@ -69,7 +70,7 @@ def _resolve(root: dict[str, Any], reference: str) -> dict[str, Any]:
     except (KeyError, TypeError) as exc:
         raise RuntimeError(f"missing schema reference: {reference}") from exc
     if not isinstance(node, dict):
-        raise RuntimeError(f"schema reference does not name an object: {reference}")
+        raise RuntimeError(f"schema reference does not name an object: {reference}")  # noqa: TRY004
     return node
 
 
@@ -113,4 +114,12 @@ def validate_document(doc: object) -> list[str]:
     """An empty error list means the document matches exactly one bundle kind."""
     schema = json.loads(Path(__file__).with_name("schema.json").read_text(encoding="utf-8"))
     _check_schema(schema)
-    return _validate(doc, schema, schema, "$")
+    errors = _validate(doc, schema, schema, "$")
+    if isinstance(doc, dict) and doc.get("kind") == "env" and doc.get("image") is not None:
+        image = doc["image"]
+        if not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+            errors.append("$.image: expected an immutable Docker image ID")
+        versions = doc.get("versions")
+        if not isinstance(versions, dict) or versions.get("image") != image:
+            errors.append("$.versions.image: differs from runtime image")
+    return errors

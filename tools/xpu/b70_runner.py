@@ -36,6 +36,8 @@ _TOKEN = re.compile(r"\b(?:gh[pousr]_|hf_)[A-Za-z0-9_]+")
 _FLAGS = {
     "-C", "-W", "-f", "-fd", "-b", "-c", "-e", "-m", "--version", "--prune", "--detach", "--orphan",
     "--empty", "--ff-only", "--force", "--no-deps", "--constraint", "--format", "--", "-r", "--short",
+    "--rm", "--pull", "--name", "--network", "--device", "--user", "--workdir", "--interactive",
+    "--entrypoint", "--group-add", "--mount", "--env",
     "--porcelain", "--verify", "--cached", "--check", "--stat", "--left-right", "--count",
 }
 _FAIL = {"fail", "failed", "failure", "error"}
@@ -221,6 +223,7 @@ def merge_env(*, versions: dict, probes: dict, models: dict, fingerprint_hash: s
         "torch": "torch", "torch_version_xpu": "torch_xpu", "triton": "triton", "dle": "dle",
         "compute_runtime": "compute_runtime", "igc": "igc", "level_zero": "level_zero_loader",
         "kernel_release": "kernel", "xe": "xe", "ocloc": "ocloc", "icpx": "icpx",
+        "python": "python", "image": "image",
     }
     selected = {
         key: versions.get(key, versions.get(alias)) or probes.get(key)
@@ -242,6 +245,7 @@ def merge_env(*, versions: dict, probes: dict, models: dict, fingerprint_hash: s
         "data_ptr": probes.get("data_ptr") or {},
         "triton_add": probes.get("triton_add") or {},
         "host_ram_shadow": probes.get("host_ram_shadow") or {},
+        "container_probes": probes.get("container_probes") or {},
         "host_ram_gib": probes.get("host_ram_gib"),
         "swap_gib": probes.get("swap_gib"),
         "xpu_smi": versions.get("xpu_smi", probes.get("xpu_smi", probes.get("device"))),
@@ -385,7 +389,9 @@ def _venv_python(venv: Path) -> Path:
     return unix if unix.exists() else venv / "Scripts" / "python.exe"
 
 
-def _collect_versions(worktree: Path, python: Path, logs: list[str]) -> tuple[dict, dict]:
+def _collect_versions(
+    worktree: Path, python: Path, logs: list[str], *, container: dict | None = None,
+) -> tuple[dict, dict]:
     versions: dict[str, str | None] = {}
     probes: dict = {}
 
@@ -402,10 +408,10 @@ def _collect_versions(worktree: Path, python: Path, logs: list[str]) -> tuple[di
 
     versions["kernel"] = capture("kernel", ["uname", "-r"])
     packages = {
-        "compute_runtime": "intel-opencl-icd", "ocloc": "intel-ocloc", "igc": "intel-igc-core",
+        "compute_runtime": "libze-intel-gpu1", "ocloc": "intel-ocloc", "igc": "intel-igc-core-2",
         "level_zero_loader": "libze1", "level_zero_gpu": "libze-intel-gpu1",
     }
-    for name, package in packages.items():
+    for name, package in ({} if container else packages).items():
         versions[name] = capture(name, ["dpkg-query", "-W", "-f=${Version}", package])
     discovery = capture("discovery", ["xpu-smi", "discovery"])
     probes["device"] = discovery
@@ -413,21 +419,38 @@ def _collect_versions(worktree: Path, python: Path, logs: list[str]) -> tuple[di
     icpx = Path(prefix) / "compiler" / "latest" / "bin" / "icpx" if prefix else None
     versions["icpx"] = capture("icpx", [str(icpx), "--version"]) if icpx and icpx.is_file() else None
     versions["dle"] = versions["icpx"]
-    if python.is_file():
+    if container:
+        from tools.xpu.container import docker_argv
+
+        try:
+            completed = _spawn_suite(
+                docker_argv(**container, mode="versions"), cwd=worktree, env=scrub_env(dict(os.environ)),
+                timeout_s=60, stdin="",
+            )
+        except subprocess.TimeoutExpired:
+            run_cmd(["docker", "kill", container["name"]], cwd=worktree, timeout=20)
+            raise
+        if completed.returncode:
+            raise RuntimeError(completed.stderr or "container version collection failed")
+        collected = json.loads(completed.stdout)
+        if not isinstance(collected, dict) or collected.get("image") != container["image"]:
+            raise RuntimeError("invalid container runtime metadata")
+        versions.update(collected)
+    elif python.is_file():
         code = (
-            "import json, torch, triton; "
+            "import json, sys, torch, triton; "
             "print(json.dumps({'torch':str(torch.__version__),"
-            "'torch_xpu':getattr(torch.version,'xpu',None),'triton':str(triton.__version__)}))"
+            "'torch_xpu':getattr(torch.version,'xpu',None),'triton':str(triton.__version__),'python':sys.version.split()[0]}))"
         )
         text = capture("python versions", [str(python), "-c", code])
         if text:
             try:
                 collected = json.loads(text)
                 if isinstance(collected, dict):
-                    versions.update({key: collected.get(key) for key in ("torch", "torch_xpu", "triton")})
+                    versions.update({key: collected.get(key) for key in ("torch", "torch_xpu", "triton", "python")})
             except ValueError:
                 logs.append("python versions: invalid JSON")
-    for key in ("torch", "torch_xpu", "triton", "xe"):
+    for key in ("torch", "torch_xpu", "triton", "xe", "python", "image"):
         versions.setdefault(key, None)
     try:
         info = parse_meminfo(Path("/proc/meminfo").read_text(encoding="utf-8"))
@@ -450,8 +473,8 @@ def _collect_versions(worktree: Path, python: Path, logs: list[str]) -> tuple[di
     return versions, probes
 
 
-def _model_revisions() -> dict:
-    home = os.environ.get("HF_HOME")
+def _model_revisions(model_cache: str | None = None) -> dict:
+    home = model_cache or os.environ.get("HF_HOME")
     if not home:
         return {}
     return _redact(_read_json(Path(home) / "tensorfold-xpu-revisions.json") or {}, drop_keys=True)
@@ -507,7 +530,8 @@ def _spawn_suite(
 
 
 def invoke_suite(
-    name: str, *, repo: Path, worktree: Path, out_dir: Path, timeout_s: float, model_cache: str | None
+    name: str, *, repo: Path, worktree: Path, out_dir: Path, timeout_s: float, model_cache: str | None,
+    container: dict | None = None,
 ) -> SuiteResult:
     """Suites run from the harness checkout, never from the branch tree, and die at timeout_s."""
     code = (
@@ -526,11 +550,16 @@ def invoke_suite(
         {"name": name, "worktree": str(worktree), "out_dir": str(out_dir),
          "timeout_s": timeout_s, "model_cache": model_cache}
     )
+    argv = [sys.executable, "-c", code]
+    if container:
+        from tools.xpu.container import docker_argv
+
+        argv = docker_argv(**container)
     try:
-        completed = _spawn_suite(
-            [sys.executable, "-c", code], cwd=repo, env=env, timeout_s=timeout_s, stdin=request
-        )
+        completed = _spawn_suite(argv, cwd=repo, env=env, timeout_s=timeout_s, stdin=request)
     except subprocess.TimeoutExpired:
+        if container:
+            run_cmd(["docker", "kill", container["name"]], cwd=repo, timeout=20)
         return SuiteResult(name, "fail", f"timed out after {timeout_s:g}s", {}, "timeout\n")
     if completed.returncode:
         detail = (completed.stderr or completed.stdout or "suite process failed").strip()
@@ -619,6 +648,24 @@ def _remove_code_worktree(repo: Path, work_dir: Path, worktree: Path, results_di
     _git(["worktree", "remove", "--force", str(worktree)], cwd=repo)
 
 
+def _container_mode(image: str | None, mode: str | None, state_dir: Path, sha: str) -> bool:
+    """A persistent venv override is consumed by one queued head, then container mode resumes."""
+    path = state_dir / "venv-fallback.json"
+    if not image:
+        return False
+    if mode != "venv":
+        if path.exists():
+            _write_json(path, {})
+        return True
+    previous = _read_json(path)
+    if previous and previous.get("image") == image:
+        print("one-cycle venv fallback consumed; using container")
+        return True
+    _write_json(path, {"image": image, "sha": sha})
+    print("using host venv for one cycle; subsequent heads use container")
+    return False
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
@@ -638,6 +685,9 @@ def _parser() -> argparse.ArgumentParser:
         default=Path(os.environ.get("TF_XPU_VENV", "~/.local/share/tensorfold-xpu/venv")).expanduser(),
     )
     parser.add_argument("--triton-cache", type=Path, default=Path("~/.triton/cache").expanduser())
+    parser.add_argument("--image", default=os.environ.get("TF_XPU_IMAGE"))
+    parser.add_argument("--mode", choices=("container", "venv"), default=os.environ.get("TF_XPU_MODE"))
+    parser.add_argument("--native-ext", type=Path, default=os.environ.get("TF_XPU_EXT_DIR"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--timeout-scale", type=float, default=1.0)
     return parser
@@ -652,6 +702,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not math.isfinite(args.timeout_scale) or args.timeout_scale <= 0:
         parser.error("--timeout-scale must be finite and positive")
+    if args.mode not in {None, "container", "venv"}:
+        parser.error("TF_XPU_MODE must be container or venv")
+    if args.mode == "container" and not args.image:
+        parser.error("container mode requires --image or TF_XPU_IMAGE")
     repo, work_dir, state_dir = args.repo.resolve(), args.work_dir.resolve(), args.state_dir.resolve()
     results_dir = (args.results_dir or work_dir / "results-wt").resolve()
     if queue_stopped(state_dir):
@@ -681,6 +735,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             print(f"{head.branch} {head.sha} suites={','.join(spec.suites)}")
             return 0
+        use_container = _container_mode(args.image, args.mode, state_dir, head.sha)
         work_dir.mkdir(parents=True, exist_ok=True)
         code_path = work_dir / head.sha
         assert_inside(work_dir, code_path)
@@ -707,10 +762,22 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, TypeError) as exc:
             failures.append("run.yml")
             logs.append(f"run.yml: {_redact(str(exc))}")
-        if not python.is_file():
+        container = None
+        if use_container and not failures:
+            from tools.xpu.container import container_name, image_id, render_gids
+
+            args.triton_cache.mkdir(parents=True, exist_ok=True)
+            model_home = spec.model_cache or os.environ.get("HF_HOME")
+            container = {
+                "image": image_id(args.image, repo=repo), "name": container_name(head.sha, "versions"),
+                "repo": repo, "worktree": worktree, "out_dir": out_dir, "cache": args.triton_cache,
+                "model_cache": Path(model_home) if model_home else None, "gids": render_gids(),
+                "knobs": knob_env(dict(os.environ)), "native_ext": args.native_ext,
+            }
+        if not use_container and not python.is_file():
             failures.append("venv is missing")
             logs.append("venv is missing")
-        elif not failures:
+        elif not use_container and not failures:
             try:
                 completed = run_cmd(
                     [str(python), "-m", "pip", "install", "-e", str(worktree), "--no-deps", "--constraint",
@@ -723,7 +790,15 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 failures.append("pip install")
                 logs.append(str(_redact(str(exc))))
-        versions, probes = _collect_versions(worktree, python, logs)
+        if container:
+            try:
+                versions, probes = _collect_versions(worktree, python, logs, container=container)
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                versions, probes = {"image": container["image"]}, {}
+                failures.append("container environment")
+                logs.append(str(_redact(str(exc))))
+        else:
+            versions, probes = _collect_versions(worktree, python, logs)
         digest = toolchain_hash(versions)
         _update_fingerprint(state_dir, args.triton_cache, fingerprint(digest, knob_env(dict(os.environ))), logs)
         for name in spec.suites:
@@ -743,6 +818,7 @@ def main(argv: list[str] | None = None) -> int:
                     name, repo=repo, worktree=worktree, out_dir=out_dir,
                     timeout_s=suite_timeout_min(spec, name) * 60 * args.timeout_scale,
                     model_cache=spec.model_cache,
+                    **({"container": {**container, "name": container_name(head.sha, name)}} if container else {}),
                 )
                 status = str(_result_field(result, "status", "error")).lower()
                 statuses[name] = status if status in {"pass", "todo", "fail", "error"} else "error"
@@ -779,7 +855,7 @@ def main(argv: list[str] | None = None) -> int:
             statuses.setdefault(name, "todo")
         try:
             env_doc = merge_env(
-                versions=versions, probes=probes, models=_model_revisions(), fingerprint_hash=digest,
+                versions=versions, probes=probes, models=_model_revisions(spec.model_cache), fingerprint_hash=digest,
             )
         except RuntimeError as exc:
             failures.append("environment document")
@@ -807,6 +883,13 @@ def main(argv: list[str] | None = None) -> int:
         diff = render_diff(compare_bundles(bundle, baseline)) if baseline else "No baseline bundle available."
         (bundle / "summary.md").write_text(str(_redact(render_summary_md(doc, diff))), encoding="utf-8")
         (bundle / "logs").mkdir()
+        for filename in ("unit-host.xml", "unit-host.txt"):
+            source = out_dir / filename
+            if source.is_file():
+                assert_inside(out_dir, source)
+                (bundle / "logs" / filename).write_text(
+                    str(_redact(source.read_text(encoding="utf-8"))), encoding="utf-8",
+                )
         (bundle / "logs" / "runner.log").write_text(str(_redact("\n".join(logs))) + "\n", encoding="utf-8")
         append_index(
             results_dir / "index.jsonl",

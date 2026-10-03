@@ -19,6 +19,16 @@
       ],
       "properties": {
         "kind": {"const": "env"},
+        "python": {"$ref": "#/$defs/version"},
+        "image": {"$ref": "#/$defs/version"},
+        "container_probes": {"type": "object"},
+        "versions": {
+          "type": "object", "additionalProperties": true,
+          "properties": {
+            "python": {"$ref": "#/$defs/version"},
+            "image": {"$ref": "#/$defs/version"}
+          }
+        },
         "torch": {"$ref": "#/$defs/version"},
         "torch_version_xpu": {"$ref": "#/$defs/version"},
         "triton": {"$ref": "#/$defs/version"},

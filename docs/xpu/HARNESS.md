@@ -303,3 +303,90 @@ succeeded. A later 2 GiB step, then another 2 GiB, moved `MemAvailable` by about
 - Swapfile creation and activation on the box's filesystem.
 - The systemd user timer and results push using the box's configured Git access.
 - Exact `bmg_guc*` and `bmg_huc*` firmware filenames.
+
+## Container runtime rollout
+
+The container path is implemented. Building and running it on the B70 is **[UNVERIFIED]** until an exact-SHA
+container bundle lands. Docker Engine (`docker.io` on Ubuntu 26.04), permission to use its daemon (the `docker`
+group or rootless Docker), `/dev/dri` render access, kernel >= 6.17 with `xe`, firmware, ReBAR, host `xpu-smi`,
+and offline model snapshots are host prerequisites. DLE 2026.1 remains on the host for native builds only.
+Docker installation and group membership are operator steps.
+
+Build in a clean shell, without DLE or oneAPI sourced:
+
+```bash
+bash tools/xpu/docker/build.sh
+bash tools/xpu/docker/build.sh serve
+```
+
+The first command builds `toolchain`, prints `tensorfold-xpu:tc-<hash12>` and its image ID. The tag hashes the
+Dockerfile, deb lock and constraints. The serve tag additionally identifies the source. Both targets pin torch
+2.14.1+xpu and triton-xpu 3.8.0; no SYCL compiler or xpu-smi enters the image. Bootstrap and Docker share
+`tools/xpu/debs.lock`. OpenCL and Python development headers remain installed while requirement probes run.
+
+Set `TF_XPU_IMAGE` in `runner.env` to the built toolchain tag. Container mode is then the default, with no venv
+parity gate. A tag must resolve to a local image; the runner never pulls and uses the resolved immutable image ID
+for the entire run. The standing `.b70/run.yml` requests `[env, unit-host]`. `--image` overrides the image setting.
+The host runner itself still needs Python; the existing service can keep using its venv Python.
+
+For a manual cycle, after updating the trusted harness checkout:
+
+```bash
+python3 tools/xpu/b70_runner.py --once --image tensorfold-xpu:tc-<hash12>
+```
+
+This selects and publishes one pending head using the normal runner protocol. It mounts the harness read-only at
+`/harness`, code at `/src`, output at `/out`, the runner's Triton cache at `/cache/triton`, and `model_cache` from
+run.yml (or host `HF_HOME`) read-only at `/models`. GPU render groups are numeric; output files use the runner's
+UID/GID. Networking is disabled, HF runs offline, and only Intel Triton/IGC knobs are forwarded. Editable installation
+uses `--no-deps --no-build-isolation`, so setuptools is installed in the image and no build dependencies are fetched.
+On a suite deadline the host kills the named Docker container as well as its client process. Health checks, STOP
+handling, and results publication stay on the host.
+
+Inspect the first container bundle before trusting any kernel results. Compare torch, triton, `torch.version.xpu`,
+DPAS flags and `triton_add` against the latest venv bundle. A difference is a container bug to fix. `env.json`
+records Python and the image ID at the top level and under `versions`; the ID participates in cache invalidation.
+`container_probes` records fresh gcc launchers, a gcc wrapper that removes Python include flags, and a Level Zero
+run with an empty OpenCL ICD directory. The requirement-removal variants provide evidence for a future image
+change; gcc with Python headers and native manifest compatibility gate env. Package compatibility with the host
+kernel is demonstrated by the fresh gcc Triton add and DPAS flags. These probes remain **[UNVERIFIED]** on the B70.
+
+For a single fallback invocation use `TF_XPU_MODE=venv python3 tools/xpu/b70_runner.py --once` (or `--mode venv`).
+The runner records consumption in `venv-fallback.json` beneath its state directory: even if the override stays in the
+EnvironmentFile, subsequent queued heads use the container. Idle and dry-run polls do not consume the override.
+Remove it after the cycle; a normal container invocation rearms the override for a later explicit fallback.
+No automatic fallback occurs when a container fails. A later change removes both the venv execution path and this override.
+`bootstrap.sh --apply` and `--system` are deprecated for runtime provisioning once the image builds; the read-only
+report, explicit kernel installation, host swap and host model-download steps above remain available.
+
+`unit-host` executes `python -m pytest tests --host-only -q` and publishes its full JUnit and text output under
+bundle `logs/`. `--host-only` excludes `tests/cuda` and test modules that directly use MLX, fake MLX modules, or
+`_serve_mlx`, plus tests importing those test helpers. It also skips three mixed hub tests that assume macOS backend
+selection or MLX family kernels. Selection is conservative at module granularity, so mixed MLX/portable modules are
+excluded together for this rollout. All source tests remain in place: a supported MLX machine can still run
+`python -m pytest tests -q`. Future kernel work should run that backend's tests rather than treating the reduced host
+suite as kernel validation. GPU suites remain TODO until their implementations land.
+
+Serving uses the serve tag printed by build.sh and the numeric render-node group:
+
+```bash
+docker run --rm -it --device /dev/dri --group-add <render-gid> -p 8000:8000 \
+  -v <HF_HOME>:/models:ro -e HF_HOME=/models -e HF_HUB_OFFLINE=1 \
+  tensorfold-xpu:serve-<hash12>-<sha12>-<diff12> serve --backend xpu <model-path-in-models>
+```
+
+The XPU engine must be implemented before this serving command can handle requests.
+
+Native compilation is a separate host step after K0 lands:
+
+```bash
+TF_XPU_PYTHON=/absolute/pinned/venv/bin/python bash tools/xpu/build_ext.sh
+```
+
+`build_ext.sh` requires clean, committed XPU sources, DLE 2026.1, torch 2.14.x+xpu and SYCL runtime `20260100`.
+It sources the isolated compiler vars script only inside a subshell and calls K0's
+`tensorfold.xpu.build.build_aot(output_dir)` entry point. That entry point is **not yet implemented**. The output is
+`build/xpu-ext/<hash>/`, where the hash covers torch/SYCL metadata, compiler version and source SHA. A successful
+build writes `manifest.json` with `torch`, `sycl`, `dle`, `source_sha` and `compiler`. Set `TF_XPU_EXT_DIR` (or
+`--native-ext`) to that directory to mount it read-only at `/opt/tf-ext`. Env fails on missing or mismatched manifests.
+The engine loader remains K0 work; compilation never occurs inside the runtime image.

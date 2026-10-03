@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import subprocess
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,14 +82,14 @@ def _env_probes(hooks: dict[str, Any] | None = None) -> tuple[str, str, dict[str
             raise ImportError("torch hook is missing")
         probes["torch"] = getattr(torch, "__version__", None)
         probes["torch_version_xpu"] = getattr(getattr(torch, "version", None), "xpu", None)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
         failures.append(f"torch is missing or failed to import: {exc}")
     try:
         triton = hooks["triton"] if "triton" in hooks else importlib.import_module("triton")
         if triton is None:
             raise ImportError("Triton hook is missing")
         probes["triton"] = getattr(triton, "__version__", None)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
         failures.append(f"Triton is missing or failed to import: {exc}")
         probes["triton_add"]["error"] = str(exc)
     device_ok = False
@@ -103,13 +106,13 @@ def _env_probes(hooks: dict[str, Any] | None = None) -> tuple[str, str, dict[str
                     probes["dpas_flags"][flag] = value if isinstance(value, bool) else None
                     if value is not True:
                         failures.append(f"{flag} is not True; False suggests missing ocloc")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
             failures.append(f"XPU device query failed: {exc}")
     if device_ok:
         try:
             pointer = int(torch.empty(1, dtype=torch.uint8, device="xpu").data_ptr())
             probes["data_ptr"] = {"raw": str(pointer), "value": pointer, "high_bit": pointer >= 2**63}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
             probes["data_ptr"]["error"] = str(exc)
             failures.append(f"data_ptr probe failed: {exc}")
         if triton is not None:
@@ -117,7 +120,7 @@ def _env_probes(hooks: dict[str, Any] | None = None) -> tuple[str, str, dict[str
                 probes["triton_add"] = _triton_vector_add(torch, triton)
                 if not probes["triton_add"]["ok"]:
                     failures.append("Triton vector add mismatch")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
                 probes["triton_add"] = {"ok": False, "error": str(exc)}
                 failures.append(f"Triton vector add failed: {exc}")
     read_meminfo = hooks.get("read_meminfo", _read_meminfo)
@@ -149,7 +152,7 @@ def _env_probes(hooks: dict[str, Any] | None = None) -> tuple[str, str, dict[str
         try:
             info = read_meminfo()
             probes["host_ram_shadow"]["baseline"] = info
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
             info = {}
             probes["host_ram_shadow"]["error"] = str(exc)
             failures.append(f"host memory query failed: {exc}")
@@ -193,21 +196,42 @@ def run_suite(
     model_cache: str | None = None,
     hooks: dict[str, Any] | None = None,
 ) -> SuiteResult:
-    """Only env executes code; all other recognized suites return TODO status."""
+    """Environment and host tests execute; future GPU suites remain explicit TODOs."""
     if not known_suite(name):
         detail = f"unknown suite: {name}"
         return SuiteResult(name, "error", detail, {}, detail + "\n")
+    if name == "unit-host":
+        output = Path(out_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests", "-q", "--host-only",
+             f"--junitxml={output / 'unit-host.xml'}"],
+            cwd=worktree, text=True, capture_output=True, timeout=timeout_s, check=False,
+            env={**os.environ, "TF_TEST_DEVICE": "cpu"},
+        )
+        log = completed.stdout + completed.stderr
+        (output / "unit-host.txt").write_text(log, encoding="utf-8")
+        return SuiteResult(name, "pass" if completed.returncode == 0 else "fail",
+                           f"host pytest exited {completed.returncode}", {}, log)
     if name != "env":
         return _todo(name)
     try:
         status, detail, payload = _env_probes(hooks)
         probes = payload["probes"]
+        if os.environ.get("TF_XPU_IMAGE_ID") and hooks is None:
+            from .container_probes import container_probes
+
+            checks = container_probes()
+            probes["container_probes"] = checks
+            if not checks["ok"]:
+                status = "fail"
+                detail += "; container runtime probes failed"
         output = Path(out_dir)
         output.mkdir(parents=True, exist_ok=True)
         (output / "env-probes.json").write_text(
             json.dumps(probes, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
         return SuiteResult(name, status, detail, probes, detail + "\n")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - backend import and device failures become probe data
         detail = f"environment probe failed: {type(exc).__name__}: {exc}"
         return SuiteResult(name, "error", detail, {}, detail + "\n")

@@ -1,0 +1,17 @@
+.git
+build/
+.claude/
+.codex/
+.agents/
+.aws/
+**/__pycache__
+**/*.so
+**/*.safetensors
+**/*.bin
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+**/.triton
+**/*.egg-info
+.env
+.env.*
