@@ -3,12 +3,14 @@
 import pytest
 import torch
 
-if not torch.cuda.is_available():
-    pytest.skip("CUDA only", allow_module_level=True)
+from tests.devices import device_available
 
-from tensorfold.families.qwen3_5.cuda import glue  # noqa: E402
+if not device_available():
+    pytest.skip("needs CUDA or XPU", allow_module_level=True)
 
-dev = "cuda"
+from tensorfold.families.qwen3_5.cuda import glue
+
+pytestmark = pytest.mark.xpu_kernel("glue")
 
 
 def _rows_alone(fn, *args):
@@ -17,25 +19,28 @@ def _rows_alone(fn, *args):
     for r in range(W):
         one = fn(*[a[r:r + 1] if torch.is_tensor(a) and a.dim() > 0 and a.shape[0] == W else a for a in args])
         for f, o in zip(full, one):
-            assert torch.equal(f[r:r + 1], o), f"row {r} differs"
+            bits = torch.int16 if f.dtype == torch.bfloat16 else torch.int32
+            assert torch.equal(f[r:r + 1].view(bits), o.view(bits)), f"row {r} differs"
     return full
 
 
-def test_add_rmsnorm():
+def test_add_rmsnorm(DEV):
+    dev = DEV
     x = torch.randn(9, 5120, device=dev).bfloat16()
     r = torch.randn(9, 5120, device=dev).bfloat16()
     w = (torch.rand(5120, device=dev) + 0.5).bfloat16()
-    h, y, xs = _rows_alone(lambda x, r, w: glue.add_rmsnorm(x, r, w, 1e-6), x, r, w)
+    _h, y, xs = _rows_alone(lambda x, r, w: glue.add_rmsnorm(x, r, w, 1e-6), x, r, w)
     hf = (x.float() + r.float()).bfloat16().float()
     ref = hf * torch.rsqrt(hf.pow(2).mean(-1, keepdim=True) + 1e-6) * w.float()
     assert (y.float() - ref).abs().max() < 0.05
     assert torch.allclose(xs, y.float().reshape(9, 80, 64).sum(-1), atol=1e-3)
 
 
-def test_swiglu_and_gate_mul():
+def test_swiglu_and_gate_mul(DEV):
+    dev = DEV
     g = torch.randn(5, 17408, device=dev).bfloat16()
     u = torch.randn(5, 17408, device=dev).bfloat16()
-    a, xs = _rows_alone(glue.swiglu, g, u)
+    a, _xs = _rows_alone(glue.swiglu, g, u)
     ref = torch.nn.functional.silu(g.float()) * u.float()
     assert (a.float() - ref).abs().max() < 0.05
     o = torch.randn(5, 24, 256, device=dev).bfloat16()
@@ -45,17 +50,19 @@ def test_swiglu_and_gate_mul():
     assert (out.float().reshape(5, 24, 256) - o.float() * torch.sigmoid(gate)).abs().max() < 0.05
 
 
-def test_gdn_pre_matches_torch():
+def test_gdn_pre_matches_torch(DEV):
+    dev = DEV
     W, C = 6, 10240
     qkv = torch.randn(W, C, device=dev).bfloat16()
     cs = torch.randn(3, C, device=dev).bfloat16()
     cw = torch.randn(C, 4, device=dev).bfloat16()
-    win = torch.tensor([[0, 1, 2, 3 + i] if i == 0 else [1, 2, 3, 3 + i] for i in range(W)], device=dev, dtype=torch.int32)
+    win = torch.tensor([[0, 1, 2, 3 + i] if i == 0 else [1, 2, 3, 3 + i] for i in range(W)],
+                       device=dev, dtype=torch.int32)
     a = torch.randn(W, 48, device=dev).bfloat16()
     b = torch.randn(W, 48, device=dev).bfloat16()
     alog = torch.randn(48, device=dev)
     dtb = torch.randn(48, device=dev)
-    q, k, v, g, beta = glue.gdn_pre(qkv, cs, cw, win, a, b, alog, dtb, kh=16, vh=48, dk=128)
+    q, _k, v, g, beta = glue.gdn_pre(qkv, cs, cw, win, a, b, alog, dtb, kh=16, vh=48, dk=128)
     src = torch.cat([cs, qkv]).float()
     conv = sum(src[win[:, j].long()] * cw.float()[:, j] for j in range(4))
     c = torch.nn.functional.silu(conv).bfloat16().float()

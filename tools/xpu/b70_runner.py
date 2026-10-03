@@ -856,6 +856,8 @@ def main(argv: list[str] | None = None) -> int:
                     gpu_stopped = True
                     raise_stop(state_dir, str(_redact(f"GPU after {name}: {health.detail}")))
                 break
+            if name == "triton-smoke" and statuses[name] != "pass":
+                break
         for name in spec.suites:
             statuses.setdefault(name, "todo")
         try:
@@ -888,9 +890,9 @@ def main(argv: list[str] | None = None) -> int:
         diff = render_diff(compare_bundles(bundle, baseline)) if baseline else "No baseline bundle available."
         (bundle / "summary.md").write_text(str(_redact(render_summary_md(doc, diff))), encoding="utf-8")
         (bundle / "logs").mkdir()
-        for filename in ("unit-host.xml", "unit-host.txt"):
-            source = out_dir / filename
-            if source.is_file():
+        for source in sorted(out_dir.iterdir()):
+            if source.is_file() and source.suffix in {".xml", ".txt", ".json"}:
+                filename = source.name
                 assert_inside(out_dir, source)
                 (bundle / "logs" / filename).write_text(
                     _log_text(source.read_text(encoding="utf-8")), encoding="utf-8",

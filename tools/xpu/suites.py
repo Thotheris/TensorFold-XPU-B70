@@ -1,4 +1,4 @@
-"""The environment suite runs probes and future GPU suites remain explicit TODOs."""
+"""Environment, Triton probes, GPU tests and kernel measurements execute in isolated suites."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -187,6 +189,79 @@ def _todo(name: str) -> SuiteResult:
     return SuiteResult(name, "todo", detail, payload, detail + "\n")
 
 
+def _xpu_available() -> bool:
+    try:
+        torch = importlib.import_module("torch")
+        return bool(torch.xpu.is_available())
+    except (ImportError, AttributeError, RuntimeError):
+        return False
+
+
+def _pytest_counts(path: Path) -> dict[str, int]:
+    cases = list(ET.parse(path).getroot().iter("testcase"))
+    counts = {"tests": len(cases), "passed": 0, "failed": 0, "errors": 0, "skipped": 0}
+    for case in cases:
+        key = next((key for tag, key in (("failure", "failed"), ("error", "errors"), ("skipped", "skipped"))
+                    if case.find(tag) is not None), "passed")
+        counts[key] += 1
+    return counts
+
+
+def _pytest_suite(name: str, *, worktree: Path, out_dir: Path, timeout_s: int) -> SuiteResult:
+    gpu = name != "unit-host"
+    if gpu and not _xpu_available():
+        return SuiteResult(name, "fail", "requested XPU is unavailable", {}, "requested XPU is unavailable\n")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = name.replace(":", "--")
+    report = out_dir / f"{stem}.xml"
+    report.unlink(missing_ok=True)
+    argv = [sys.executable, "-m", "pytest", "tests/cuda" if gpu else "tests", "-q", f"--junitxml={report}"]
+    if not gpu:
+        argv.append("--host-only")
+    elif name.startswith("kernels:"):
+        argv.append(f"--xpu-kernel={name.split(':', 1)[1]}")
+    try:
+        completed = subprocess.run(argv, cwd=worktree, text=True, capture_output=True, timeout=timeout_s, check=False,
+                                   env={**os.environ, "TF_TEST_DEVICE": "xpu" if gpu else "cpu"})
+        log = completed.stdout + completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        def decoded(value):
+            return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+        log = decoded(exc.stdout) + decoded(exc.stderr) + f"\ntimeout after {timeout_s}s\n"
+        (out_dir / f"{stem}.txt").write_text(log, encoding="utf-8")
+        return SuiteResult(name, "error", f"pytest timed out after {timeout_s}s", {}, log)
+    (out_dir / f"{stem}.txt").write_text(log, encoding="utf-8")
+    try:
+        counts = _pytest_counts(report)
+    except (OSError, ET.ParseError) as exc:
+        return SuiteResult(name, "fail", f"missing or invalid pytest report: {exc}", {}, log)
+    ok = completed.returncode == 0 and not counts["failed"] and not counts["errors"]
+    if gpu:
+        ok = ok and counts["passed"] > 0
+    detail = f"pytest exited {completed.returncode}: {counts['passed']} passed, {counts['skipped']} skipped"
+    if gpu and counts["passed"] == 0:
+        detail += "; no XPU tests passed"
+    return SuiteResult(name, "pass" if ok else "fail", detail, {"pytest": counts}, log)
+
+
+def _kernel_benchmark(name: str, *, worktree: Path, out_dir: Path, timeout_s: int) -> dict:
+    from .schema_check import validate_document
+
+    path = out_dir / "kernels" / f"{name}.json"
+    path.unlink(missing_ok=True)
+    completed = subprocess.run([sys.executable, "-m", "tools.xpu.kernel_benchmarks", name, str(out_dir)],
+                               cwd=worktree, text=True, capture_output=True, timeout=timeout_s, check=False)
+    if completed.returncode:
+        raise RuntimeError(completed.stderr or completed.stdout or "kernel benchmark failed")
+    metrics = json.loads(path.read_text(encoding="utf-8"))
+    errors = validate_document(metrics)
+    if errors or metrics.get("name") != name or metrics.get("kind") != "kernel":
+        raise ValueError(f"invalid kernel measurements: {errors or 'wrong kernel name or kind'}")
+    if metrics.get("bitwise_ok") is not True or metrics.get("status") != "pass":
+        raise ValueError("kernel measurements did not pass bitwise checks")
+    return metrics
+
+
 def run_suite(
     name: str,
     *,
@@ -196,23 +271,30 @@ def run_suite(
     model_cache: str | None = None,
     hooks: dict[str, Any] | None = None,
 ) -> SuiteResult:
-    """Environment and host tests execute; future GPU suites remain explicit TODOs."""
+    """Implemented suites run real checks; unavailable kernels cannot produce a green bundle."""
     if not known_suite(name):
         detail = f"unknown suite: {name}"
         return SuiteResult(name, "error", detail, {}, detail + "\n")
-    if name == "unit-host":
-        output = Path(out_dir)
-        output.mkdir(parents=True, exist_ok=True)
-        completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests", "-q", "--host-only",
-             f"--junitxml={output / 'unit-host.xml'}"],
-            cwd=worktree, text=True, capture_output=True, timeout=timeout_s, check=False,
-            env={**os.environ, "TF_TEST_DEVICE": "cpu"},
-        )
-        log = completed.stdout + completed.stderr
-        (output / "unit-host.txt").write_text(log, encoding="utf-8")
-        return SuiteResult(name, "pass" if completed.returncode == 0 else "fail",
-                           f"host pytest exited {completed.returncode}", {}, log)
+    if name in {"unit-host", "unit-xpu"} or name.startswith("kernels:"):
+        start = time.monotonic()
+        result = _pytest_suite(name, worktree=Path(worktree), out_dir=Path(out_dir), timeout_s=timeout_s)
+        if name.startswith("kernels:") and result.status == "pass":
+            try:
+                metrics = _kernel_benchmark(name.split(":", 1)[1], worktree=Path(worktree), out_dir=Path(out_dir),
+                                            timeout_s=max(1, int(timeout_s - (time.monotonic() - start))))
+                result.payload = {**metrics, **result.payload}
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                result.status = "fail"
+                result.detail += f"; benchmark failed: {exc}"
+        return result
+    if name == "triton-smoke":
+        from .triton_smoke import run_probes
+
+        probes = run_probes(Path(out_dir))
+        status = "pass" if probes["ok"] else "fail"
+        log = json.dumps(probes, indent=2, allow_nan=False) + "\n"
+        (Path(out_dir) / "triton-smoke.txt").write_text(log, encoding="utf-8")
+        return SuiteResult(name, status, f"S0 probes: {status}", {"probes": {"triton_smoke": probes}}, log)
     if name != "env":
         return _todo(name)
     try:

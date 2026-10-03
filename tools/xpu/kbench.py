@@ -26,7 +26,7 @@ def percentiles_us(samples_us: list[float]) -> dict[str, float]:
     }
 
 
-def rates(*, median_us: float, nbytes: int, flops: int | float) -> dict[str, float]:
+def rates(*, median_us: float, nbytes: int, flops: float) -> dict[str, float]:
     """Throughput and peak percentages use decimal GB and tera operations."""
     if not math.isfinite(median_us) or median_us <= 0:
         raise ValueError("median_us must be finite and positive")
@@ -45,22 +45,21 @@ def rates(*, median_us: float, nbytes: int, flops: int | float) -> dict[str, flo
 
 def locates_dpas(ir_text: str) -> bool:
     """The Intel Triton DPAS encoding is present only when its marker appears."""
-    return "#triton_intel_gpu.dpas" in ir_text
+    return "#triton_intel_gpu.dpas" in ir_text or "#ttig.dpas" in ir_text
 
 
 def _get(obj: object, name: str) -> Any:
     try:
         return obj.get(name) if isinstance(obj, Mapping) else getattr(obj, name, None)
-    except Exception:
+    except Exception:  # noqa: BLE001 - compiled-kernel attributes vary by backend.
         return None
 
 
 def _counter(kernel: object, metadata: object, name: str) -> int | float | None:
     for obj in (kernel, metadata):
         value = _get(obj, name)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if isinstance(value, int) or math.isfinite(value):
-                return value
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            return value
     return None
 
 
@@ -71,6 +70,8 @@ def triton_kernel_stats(kernel: object) -> dict[str, Any]:
         metadata = _get(kernel, "metadata")
         for key in ("n_regs", "n_spills", "threads_per_warp"):
             result[key] = _counter(kernel, metadata, key)
+        if result["threads_per_warp"] is None:
+            result["threads_per_warp"] = _counter(kernel, metadata, "warp_size")
         num_warps = _counter(kernel, metadata, "num_warps")
         if num_warps is not None:
             result["num_warps"] = num_warps
@@ -79,14 +80,14 @@ def triton_kernel_stats(kernel: object) -> dict[str, Any]:
         if isinstance(asm, Mapping):
             try:
                 texts.extend(value for value in asm.values() if isinstance(value, str))
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - unreadable IR is reported as null.
                 pass
         ttgir = _get(kernel, "ttgir")
         if isinstance(ttgir, str):
             texts.append(ttgir)
         if texts:
             result["dpas"] = any(locates_dpas(text) for text in texts)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - missing metadata is reported as null.
         pass
     return result
 
@@ -132,7 +133,7 @@ def bench(
     *,
     fn: Callable[[], Any],
     nbytes: int,
-    flops: int | float,
+    flops: float,
     name: str,
     out_dir: str | Path,
     warmup: int = 5,

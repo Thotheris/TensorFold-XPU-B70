@@ -21,7 +21,7 @@ class RunSpec:
 def known_suite(name: str) -> bool:
     """Only named harness suites are executable requests."""
     return isinstance(name, str) and (
-        name in {"env", "unit-host", "unit-xpu", "e2e:27b-smoke", "e2e:nemotron-smoke"}
+        name in {"env", "unit-host", "unit-xpu", "triton-smoke", "e2e:27b-smoke", "e2e:nemotron-smoke"}
         or re.fullmatch(r"kernels:[A-Za-z0-9_-]+", name) is not None
         or re.fullmatch(r"e2e:[A-Za-z0-9_-]+-bench", name) is not None
     )
@@ -127,6 +127,6 @@ def suite_timeout_min(spec: RunSpec, name: str) -> int:
     """Per-suite limits never exceed the whole-run cap."""
     if not known_suite(name):
         raise ValueError(f"unknown suite: {name}")
-    defaults = {"env": 10, "unit-host": 30, "unit-xpu": 60}
+    defaults = {"env": 10, "unit-host": 30, "unit-xpu": 60, "triton-smoke": 10}
     default = defaults.get(name, 20 if name.startswith("kernels:") else 90 if name.endswith("-bench") else 45)
     return min(spec.timeout_min, spec.suite_timeouts_min.get(name, default))

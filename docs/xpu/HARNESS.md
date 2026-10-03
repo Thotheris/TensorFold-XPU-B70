@@ -213,10 +213,25 @@ model_cache: /models
 branch, `timeout_min` bounds the run, and `model_cache` supplies the box's model-cache
 path. Keep this file small and only request implemented tiers.
 
-`env` is implemented. `unit-xpu`, `kernels:<name>`, `e2e:27b-smoke`,
-`e2e:nemotron-smoke` and `e2e:*-bench` are stubs (TODO). The sample describes a future
-full smoke run, not a claim that those stubs currently execute GPU tests. A green bundle
-must contain real checks for the changed kernel before a port milestone can be done.
+`env`, `unit-host`, `triton-smoke`, `unit-xpu`, `kernels:glue` and `kernels:prefill-attention` execute real checks.
+`unit-xpu` sets `TF_TEST_DEVICE=xpu` and runs migrated `tests/cuda` tests. The session `DEV` fixture selects the
+device; auto selection retains CUDA preference. Unmigrated modules and native comparisons remain CUDA-only.
+The first migrated modules are Qwen glue and Triton prefill chunk invariance. More kernels can join by adding their
+module to XPU collection, an `xpu_kernel(name)` marker and a matching benchmark in `kernel_benchmarks.py`.
+
+Kernel suites select `--xpu-kernel=<name>`, run the existing checks, verify 20 identical launches, then measure
+20 event-timed repeats after five warmups. Compiled lane count, registers, spills and DPAS encoding are recorded
+when available. Byte and FLOP rates use the documented estimates in each JSON; they are microbenchmarks, not
+model throughput. Unknown kernels, missing XPU, empty collection and all-skipped GPU runs fail.
+
+`triton-smoke` runs the S0 pointer residency round-trip, numpy uint64 oracle, fp64 accuracy/timing, cast ranges,
+in-place `debug_barrier` diagnostics at R=1/2 and the reduced BM=16/NPID_FACTOR check. Mandatory failures stop the
+ladder and prevent later suites in that run. Known hazardous variants report their actual mismatch counts;
+separate-output and BM>=32 controls gate success. A diagnostic pass does not establish global fence semantics
+or certify the full upstream miscompile reproducer. Results persist incrementally under bundle `logs/`.
+
+`kernels:gdn` and other kernels without migrated tests and a benchmark cannot pass yet. E2E suites remain TODO.
+A green plumbing bundle does not certify full kernel invariance or a port milestone.
 
 ## Bundle layout
 
@@ -306,8 +321,7 @@ succeeded. A later 2 GiB step, then another 2 GiB, moved `MemAvailable` by about
 
 ## Container runtime rollout
 
-The image built on the B70 and the container `env` suite passed at `c6f94fb`; the host suite still needs a green
-bundle. Results logs normalize trailing whitespace so pytest tracebacks can be committed without weakening Git checks. Docker Engine (`docker.io` on Ubuntu 26.04), permission to use its daemon (the `docker`
+The image built on the B70; container `env` and `unit-host` passed at `253937b` (1428 passed, 30 skipped). Results logs normalize trailing whitespace so pytest tracebacks can be committed without weakening Git checks. Docker Engine (`docker.io` on Ubuntu 26.04), permission to use its daemon (the `docker`
 group or rootless Docker), `/dev/dri` render access, kernel >= 6.17 with `xe`, firmware, ReBAR, host `xpu-smi`,
 and offline model snapshots are host prerequisites. DLE 2026.1 remains on the host for native builds only.
 Docker installation and group membership are operator steps.
@@ -326,7 +340,7 @@ Dockerfile, deb lock and constraints. The serve tag additionally identifies the 
 
 Set `TF_XPU_IMAGE` in `runner.env` to the built toolchain tag. Container mode is then the default, with no venv
 parity gate. A tag must resolve to a local image; the runner never pulls and uses the resolved immutable image ID
-for the entire run. The standing `.b70/run.yml` requests `[env, unit-host]`. `--image` overrides the image setting.
+for the entire run. The standing `.b70/run.yml` requests environment, S0, host, XPU and migrated kernel checks. `--image` overrides the image setting.
 The host runner itself still needs Python; the existing service can keep using its venv Python.
 
 For a manual cycle, after updating the trusted harness checkout:
@@ -367,7 +381,7 @@ bundle `logs/`. `--host-only` excludes `tests/cuda` and test modules that direct
 selection or MLX family kernels. Selection is conservative at module granularity, so mixed MLX/portable modules are
 excluded together for this rollout. All source tests remain in place: a supported MLX machine can still run
 `python -m pytest tests -q`. Future kernel work should run that backend's tests rather than treating the reduced host
-suite as kernel validation. GPU suites remain TODO until their implementations land.
+suite as kernel validation. The migrated GPU suites above run independently of native builds.
 
 Serving uses the serve tag printed by build.sh and the numeric render-node group:
 
