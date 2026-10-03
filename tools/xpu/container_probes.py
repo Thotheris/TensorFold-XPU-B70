@@ -25,12 +25,15 @@ def validate_manifest(path: Path, *, torch: str, sycl: str) -> dict:
 def native_smoke(path: Path) -> dict:
     """The prebuilt hello extension: an exact add, a sub-group-16 butterfly and one bf16 DPAS against torch."""
     try:
+        import importlib.util
+
         import torch
 
-        from tensorfold.xpu.build import load
-
+        # env runs harness code before the branch is installed: load the module from its file, as xpu/build.py does
         build = json.loads((path / "build.json").read_text(encoding="utf-8")).get("tensorfold_xpu_hello_v1", {})
-        hello = load("tensorfold_xpu_hello_v1")
+        spec = importlib.util.spec_from_file_location("tensorfold_xpu_hello_v1", path / "tensorfold_xpu_hello_v1.so")
+        hello = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hello)
         a = torch.randn(1000, device="xpu")
         b = torch.randn(1000, device="xpu")
         x = torch.randint(-1000, 1000, (64 * 16,), device="xpu").float()
