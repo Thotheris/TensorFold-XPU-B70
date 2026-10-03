@@ -82,9 +82,30 @@ Decode is bandwidth-bound: `bytes = N*K/2 + scales + x`. Peak 608 GB/s. T0 goal:
 
 ## Measurements
 
-(none yet)
+Bundle `runs/xpu--main/da2a34f-20261003T054251Z` (torch 2.14.1+xpu, triton 3.8.0, toolchain hash 858a0a59). All rows
+`bitwise_ok`, 20 repeats; 16 lanes per warp. `n_regs` from the driver unless marked (g = GRF budget implied by `grf_mode`).
+`pct` is of 608 GB/s; DPAS is present in the 4-bit kernels' TTGIR.
+
+| Shape (N x K) | Role | M=1 us | M=1 GB/s | pct | M=16 pct | n_regs | n_spills (B) |
+|---|---|---|---|---|---|---|---|
+| 5120 x 17408 | A down | 1302 | 35.3 | 5.8 | 5.8 | 256 | 9472 |
+| 17408 x 5120 | A gate/up | 775 | 59.3 | 9.8 | 9.6 | 256 | 5120 |
+| 10240 x 5120 | A in_proj_qkv | 764 | 35.4 | 5.8 | 6.0 | 256 | 9472 |
+| 248320 x 5120 bf16 | A lm_head | 7140 | 356.2 | 58.6 | 57.6 | 128 (g) | 0 |
+| 48 x 5120 bf16 | A in_proj_a/b | 117 | 4.3 | 0.7 | 0.9 | 128 (g) | 0 |
+| 10304 x 2688 | B in_proj | 125 | 118.2 | 19.4 | 20.0 | 256 | 0 |
+| 2688 x 4096 | B out_proj | 125 | 46.9 | 7.7 | 7.9 | 256 | 0 |
+| 131072 x 2688 bf16 | B lm_head | 2023 | 348.4 | 57.3 | 56.6 | 128 (g) | 0 |
+
+Correctness on the same bundle (`unit-xpu` 37 passed, `kernels:qmm` 31 passed, 0 skipped): rows equal across
+M x BM x split-K for the SYM and bf16 kernels, SYM dequant exact, fp64 tolerance, xs from every producer equals
+`_group_sums`.
+
+T0 reads weights at 6-20% of peak and the 4-bit kernels spill at the A shapes; throughput is the same at M=1 and M=16, so
+the kernel is not bandwidth-limited. T1 tuning (`num_warps`, `grf_mode`, split-K per shape) is the next step.
 
 ## Open issues
 
-- BM = 16 dot miscompile (triton-xpu #8121) unverified on this shape; the BM sweep tests it.
-- xs cross-producer equality unverified on XPU (reduction trees differ by layout and lane count).
+- Resolved on da2a34f: the BM sweep (16..128) is bitwise row-invariant on this shape, and xs from `_group_sums`,
+  `_add_rmsnorm` and `_swiglu` is equal.
+- 4-bit decode is far from the roofline (above); the A shapes spill 5-9 KB.
