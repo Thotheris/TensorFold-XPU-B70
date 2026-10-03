@@ -1,0 +1,87 @@
+warning: host RAM below 64 GiB
+env: XPU flags, pointer, Triton add, and host RAM shadow probes passed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=e3a8dee7998f1553bf95ccf8d3b260a355c163a09f088516a2dce55b0f2d9a57
+  Stored in directory: /tmp/pip-ephem-wheel-cache-dm0i_rds/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+XPU flags, pointer, Triton add, and host RAM shadow probes passed
+
+unit-host: pytest exited 0: 1469 passed, 30 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=a7c982c256f0138ced5b22be47ca59f5a0e82418e8c1e20eb25c87b2fbfabdb2
+  Stored in directory: /tmp/pip-ephem-wheel-cache-d9u36en9/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+..................................................................ssssss [ 19%]
+sssss..ss.ss............................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 33%]
+.........................s.............................................. [ 38%]
+........................................................................ [ 43%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+.....................s....s.s........................................... [ 57%]
+........................................................................ [ 62%]
+........................................................................ [ 67%]
+........................................................................ [ 72%]
+..................................ssss.................................. [ 76%]
+........................................................................ [ 81%]
+s....................................................................... [ 86%]
+........................................................................ [ 91%]
+...............s..........sss........................................... [ 96%]
+.........................................................                [100%]
+1469 passed, 30 skipped in 145.66s (0:02:25)
+
+unit-xpu: pytest exited 0: 37 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=95fdf3b89e9c93d9c0c1be119cf7430b6c1c196fcaf855327664488b606cb4a6
+  Stored in directory: /tmp/pip-ephem-wheel-cache-hclbcfes/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+.....................................                                    [100%]
+37 passed, 44 deselected in 374.78s (0:06:14)
+
+kernels:qmm: pytest exited 0: 31 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=4b53de95e5f52163c6193562a8d2e36fdc5b3a22d85b15b3c719513b24efb189
+  Stored in directory: /tmp/pip-ephem-wheel-cache-3efu7_tu/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+...............................                                          [100%]
+31 passed, 50 deselected in 247.98s (0:04:07)
