@@ -1,0 +1,14 @@
+{
+  "branch": "xpu/main",
+  "sha": "15d4611e3ce314b48fbcdf680c94f53d5e6345cc",
+  "status": "fail",
+  "suites": {
+    "env": "fail",
+    "triton-smoke": "pass",
+    "unit-host": "pass",
+    "unit-xpu": "pass"
+  },
+  "pytest_failures": [
+    "env"
+  ]
+}

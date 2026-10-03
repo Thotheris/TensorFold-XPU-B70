@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="b70" tests="4" failures="1" skipped="0"><testcase name="env" classname="tensorfold.xpu"><failure message="env: fail" /></testcase><testcase name="triton-smoke" classname="tensorfold.xpu" /><testcase name="unit-host" classname="tensorfold.xpu" /><testcase name="unit-xpu" classname="tensorfold.xpu" /></testsuite>
