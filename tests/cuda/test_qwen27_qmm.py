@@ -293,3 +293,47 @@ def test_dense_projections_route_to_the_bf16_gemv(DEV):
     x = torch.randn((3, 5120), device=DEV).bfloat16()
     q = QLinear(w, None, None, layout="dense", bits=0, gs=0)
     assert _same(qmm_fast.matmul(x, q), bf16_matmul(x, w))
+
+
+SPANS = {
+    "contiguous": ((0, 300), (300, 1000)),
+    "disjoint": ((0, 64), (500, 700), (936, 1000)),
+    "boundary": ((63, 65), (999, 1000), (0, 1)),
+}
+
+
+@xpu_only
+@pytest.mark.parametrize("dense", [False, True], ids=["sym", "bf16"])
+@pytest.mark.parametrize("spans", sorted(SPANS))
+def test_xpu_head_rows_give_the_full_heads_columns(DEV, spans, dense):
+    """DFlash2/MTP row selections of a stored head: each column has its bits in the full head's matmul."""
+
+    from tensorfold.families.qwen3_5.cuda import qmm_fast
+    from tensorfold.families.qwen3_5.cuda.weights import QLinear
+
+    n, k = 1000, 5120
+    if dense:
+        head = QLinear(torch.randn((n, k), device=DEV).bfloat16(), None, None, layout="dense", bits=0, gs=0)
+    else:
+        words, scales = _sym_weights(DEV, n, k, 128, 17)
+        head = QLinear(words, scales, None, gs=128, sym=True)
+    parts = [qmm_fast.rows(head, a, b) for a, b in SPANS[spans]]
+    assert all(p.weight.data_ptr() == head.weight[a:].data_ptr() for p, (a, _) in zip(parts, SPANS[spans]))
+    for m in (1, 5, 16):
+        x = torch.randn((m, k), generator=torch.Generator(device=DEV).manual_seed(m), device=DEV).bfloat16()
+        full = qmm_fast.matmul(x, head)
+        want = torch.cat([full[:, a:b] for a, b in SPANS[spans]], dim=1)
+        assert _same(qmm_fast.matmul_rows(x, parts), want), (spans, m)
+        for p, (a, b) in zip(parts, SPANS[spans]):
+            assert _same(qmm_fast.matmul(x, p), full[:, a:b].contiguous()), (spans, m, a, b)
+
+
+@xpu_only
+def test_xpu_refuses_row_parallel_partials(DEV):
+    from tensorfold.families.qwen3_5.cuda import qmm_fast
+    from tensorfold.families.qwen3_5.cuda.weights import QLinear
+
+    words, scales = _sym_weights(DEV, 64, 512, 128, 1)
+    with pytest.raises(ValueError, match="not supported on XPU"):
+        qmm_fast.matmul_partial(torch.randn((1, 512), device=DEV).bfloat16(), QLinear(words, scales, None, gs=128,
+                                                                                         sym=True))

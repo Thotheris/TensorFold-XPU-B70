@@ -21,6 +21,7 @@ class QLinear:
     gs: int = 64              # inputs per quantization group
     bits: int = 4
     sym: bool = False         # symmetric INT4 (XPU): no biases, w = scales * (q - 8)
+    parent: tuple[int, int, int] | None = None   # XPU row views: (n, k, gs) whose launch plan they keep
 
     @property
     def n(self) -> int:
