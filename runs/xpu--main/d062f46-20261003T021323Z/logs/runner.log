@@ -1,0 +1,33 @@
+warning: host RAM below 64 GiB
+env: pip install failed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=6f944334dafeb1e4e8f0be9d3340616bcaab5d1665beed2dea0be03a0ab29c84
+  Stored in directory: /tmp/pip-ephem-wheel-cache-osoq23am/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied: '/opt/tf-venv/lib/python3.14/site-packages/__editable__.tensorfold-0.6.0.pth'
+Check the permissions.
+
+
+unit-host: pip install failed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=6f944334dafeb1e4e8f0be9d3340616bcaab5d1665beed2dea0be03a0ab29c84
+  Stored in directory: /tmp/pip-ephem-wheel-cache-a0jwn3o6/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied: '/opt/tf-venv/lib/python3.14/site-packages/__editable__.tensorfold-0.6.0.pth'
+Check the permissions.
