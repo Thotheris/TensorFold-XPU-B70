@@ -208,6 +208,11 @@ def scan_rows(proj, xc, state, a, d_skip, dt_bias, rows: int, *, heads: int, hea
               state_dim: int, lo: float, hi: float) -> torch.Tensor:
     """A prompt chunk's scan in ``scan_rows.cu``; ``state`` ends holding the state after the chunk's last row."""
 
+    if proj.device.type == "xpu":                  # no CUDA extension on XPU: the Triton chain (kernels/mamba_scan.md)
+        from tensorfold.xpu.kernels.mamba import scan_rows as xpu_scan_rows
+
+        return xpu_scan_rows(proj, xc, state, a, d_skip, dt_bias, rows, heads=heads, head_dim=head_dim, groups=groups,
+                             state_dim=state_dim, lo=lo, hi=hi)
     if state_dim != 128 or head_dim % 32:
         raise ValueError("the prompt scan is written for 128 states and value rows in blocks of 32")
     xd = heads * head_dim
