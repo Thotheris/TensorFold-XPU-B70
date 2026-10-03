@@ -1,0 +1,197 @@
+You are the kernel engineer for the TensorFold -> Intel Arc Pro B70 (XPU) port.
+Repository: github.com/Thotheris/TensorFold-XPU-B70. Default branch: xpu/main.
+
+Complete the bounded kernel task below. Resume existing work; do not reimplement qualified K4.T0.
+Do not start WS5 engine wiring or native N1 optimization unless the owner separately asks.
+
+== Read first, in this order ==
+1. AGENTS.md and CLAUDE.md, especially exactness, XPU rules, branches/B70 loop, definition of done and kernel cards.
+2. docs/xpu/STATUS.md, then PORT_PLAN.md section 4 (WS4), the execution order and Appendices A/B.
+3. docs/xpu/KERNEL_MAP.md and docs/xpu/kernels/qmm.md.
+4. docs/xpu/TRITON_XPU_GUIDE.md: bugs, rewrite recipes and smoke ladder.
+5. docs/xpu/B70_NATIVE_KERNEL_GUIDE.md: DPAS 8x16x16, SG16, 2D block IO, flags and determinism.
+6. docs/xpu/QUANT_FORMATS.md and CONTAINER.md: SYM W4A16 layouts, fp16 scales, g64/g128, isolated native builds.
+7. docs/xpu/reports/tensorfold-kernel-atlas-2026-10-02.html: optimization patterns, recipe maps and Intel translation.
+8. Fetch and inspect results:
+   git fetch origin results
+   git show origin/results:index.jsonl | tail -n 20
+   Read the exact bundle's summary.md, env.json, kernels/*.json and relevant logs. Reconcile STATUS.md with it.
+
+== Existing evidence; refresh it before acting ==
+- c32b417: register reporting fixed; env, triton-smoke, unit-host, unit-xpu, kernels:glue and
+  kernels:prefill-attention passed in runs/xpu--main/c32b417-20261003T050422Z.
+- da2a34f: K4.T0 SYM g64/g128, fp16/bf16 scales and BF16 GEMV qualified in
+  runs/xpu--main/da2a34f-20261003T054251Z; unit-xpu 37 passed, kernels:qmm 31 passed.
+  Cross-producer sums and the tested row/BM/split invariances passed. Do not restart this implementation.
+- da2a34f Qwen INT4 down/gate-up/qkv: 5.8-9.8% of 608 GB/s, 5120-9472 spill bytes.
+  Qwen BF16 head: 356.2 GB/s, 7140 us, zero spills. Nemotron BF16 head: 348.4 GB/s, 2023 us, zero spills.
+  Small projections share a 117-125 us timing floor; its cause remains unverified.
+- 55d2095 adds recipe-shape checks; f569957 adds host-submit/device timing probes. They had no bundles in the
+  index inspected for this prompt. A pass on da2a34f does not qualify them or a later head.
+- da2a34f's summary lists glue/prompt-attention "Bitwise break" entries because those artifacts were absent:
+  the run did not request those suites. This is missing coverage, not a measured numerical mismatch.
+- K0 build.py, K1 GDN, K2 prompt scan and K3 grouped experts remain missing in the inspected checkout.
+- The atlas audits upstream v0.6.3 at 9356df5c424b0c36b7737e37873a6f968b08de79 against v0.6.0 at
+  c4646171139ee8a3c38103eaa1699dad226ec12b. The fork's baseline and A/B scope remain unchanged.
+  Do not merge newer upstream, port unrelated families or add alternative checkpoint formats.
+
+== Ground rules ==
+- In a fresh clone, check out xpu/main. If upstream exists, disable its push URL:
+  git remote set-url --push upstream DISABLED-do-not-push-to-upstream
+  Before any gh command, run: gh repo set-default Thotheris/TensorFold-XPU-B70
+- NEVER push, open PRs or file issues against ashhart/TensorFold, 0xSero/exl3xpu or another third-party project.
+  Read/copy licensed reference code with attribution only. Push code solely to origin/xpu/main.
+- Pull --ff-only before each step when the worktree permits. Preserve unrelated dirty changes, including line endings;
+  never stash/reset them silently or stage them in your commit. If origin advanced, reconcile without force-pushing.
+- Work serially, one small topic per commit, Conventional Commits with scope, e.g. perf(xpu/k4), fix(xpu/harness).
+- Every GPU result comes from the B70 runner. Update .b70/run.yml with implemented suites needed by your step,
+  push, wait for the exact-SHA bundle, inspect it, and record coverage and measurements. Fix failures before moving on.
+  Include affected producer/glue and attention checks in combined qualification. Do not call skipped/omitted cases green.
+- CUDA and MLX behavior must remain unchanged. Use device checks, shape-only XPU_CONFIG or new xpu modules.
+  Never edit .cu files or CUDA launch constants for XPU. Device access in shared code goes through tensorfold.accel.
+- No new runtime dependencies. Never let pip replace pinned torch/triton. Install on B70 with --no-deps.
+  Never source DLE/oneAPI or put icpx on PATH in Python/Triton runtime shells; native builds use a separate shell.
+- Write/update each kernel card before implementation: arithmetic order, FMA/rounding points, lane mapping, layouts,
+  invariances, reference and tests. After qualification record SHA, bundle, toolchain hash, median us, GB/s/TFLOPS,
+  percentage of 608 GB/s or approximately 183 TFLOPS, spill bytes, compiled lanes, DPAS and n_regs_source.
+  A GRF-mode budget fallback is not measured compiler register usage.
+- Host checks: python -m pytest tests -q and ruff check src tests tools/xpu where the environment supports them.
+  The Linux runner's unit-host uses tests --host-only; report its exclusions and any local unavailable checks honestly.
+  Do not present that reduced suite as full MLX/CUDA or kernel validation.
+- On DEVICE_LOST or a runner STOP flag: stop GPU submissions, record STATUS.md and prepare a minimal repro.
+  Continue only independent host work until the operator restores GPU health. Never clear STOP automatically.
+- Ask the owner only if a step requires changing CUDA/MLX behavior, adding a runtime dependency or writing to a
+  third-party repository. The kernel steps and fork pushes below are already authorized.
+
+== Exactness and arithmetic ==
+- Row alone == the same row in every window/tree position, independent of other rows and streams.
+  Prompt chunks/resumed prompts == one-shot. Test 20 repeats, warm/cold cache, and integer bit views.
+- Split-K, tiles, subgroup width, num_warps, GRF mode and compile settings are weight-shape/format choices;
+  never choose them by runtime M or autotune in the server. Test M={1,2,15,16,17,33,65,129} and BM={16,32,64,128}
+  where applicable; the forced BM sweep is a test, not permission for M-based production dispatch.
+- Fixed-order sums, no floating atomics; stable routing ties favor lower expert IDs and expert-slot sums retain order.
+- Triton: enable_fp_fusion=False on sensitive kernels, explicit tl.fma at contract points, do_not_specialize for
+  runtime integer arguments, int/fp16 -> bf16 via fp32. For intended DPAS dot kernels, assert DPAS in compiled TTGIR.
+- Use CUDA as an operation/rounding reference; XPU serial bits define XPU exactness. tl.sum alone does not prove
+  CUDA shuffle-tree parity. Pin and share XPU reductions across serial, tree, replay and chain where equality is required.
+- Never use F.linear, oneDNN or torch library matmuls on exactness paths, including small BF16 projections.
+  deterministic_algorithms(True) for unavoidable eager ops does not waive this rule. Torch matmul may be a reference.
+- SYM weights: q=0..15, z=8 from sym (never qzeros), w=s*(q-8); derive b=-8*s in-register, never store b.
+  Preserve fp16/bf16 scales as stored. Decode uses fixed group dots plus fma(P,s,acc), then fma(xs,b,acc).
+  Canonical xs is a 64-input fp32 sum; g128 folds adjacent pairs with one ordered fp32 add.
+- Prompt GEMM separately defines rounded weights bf16_rne(fma(fp32(q),fp32(s),-8*fp32(s))) and one fixed fp32
+  chain over K. Prompt need not equal decode. Never switch arithmetic by prompt chunk size.
+- Vector-FMA and padded DPAS are separate whole-contract experiments; never select FMA for serial and DPAS for
+  verification unless bitwise equivalence is proven and shape-only launch choices remain satisfied.
+- Device pointers >=2^63 are confirmed: use p-(1<<64) if p>=1<<63 before storing signed int64 pointer tables.
+  Keep individual allocations below 4 GB and use 64-bit indexing. Graphs/FP8/quantized KV stay disabled on XPU.
+
+== Tasks, in order ==
+
+STEP 0: current-head qualification and harness coverage
+  Read any newer bundle first. Preserve the completed register-reporting fix.
+  Correct compare.py to distinguish absent cases from observed bitwise failures; required missing coverage still blocks
+  qualification. Add focused host tests for missing versus false bitwise_ok and matching-case comparisons.
+  Retain source provenance for inferred GRF budgets. Do not weaken actual failure/performance checks.
+  Obtain a bundle for the current recipe-shape checks and host/device launch-timing probes, including kernels:qmm,
+  affected glue/prefill-attention suites, env, triton-smoke, unit-host and unit-xpu. Read timing methodology and logs.
+  Separate host submission, event/device timing, wrapper allocations, group sums and reduce launches before explaining
+  the 117-125 us floor. Record exact coverage; a suite-level pass is not full recipe qualification.
+
+STEP 1: bounded K4.T1 tuning of existing SYM/BF16 kernels
+  Files: xpu/kernels/qmm/{config,lane,bf16}.py, relevant qmm wrappers, tests and tools/xpu/bench_qmm.py.
+  Preserve existing T0 arithmetic and affine CUDA paths. Run one bounded offline tuning pass with an explicit candidate
+  list and stopping point; retain the best qualified shape-only settings, then proceed to missing correctness kernels.
+  Tune BM/BN, num_warps, grf_mode, stages and shape-fixed split-K for spills/latency; do not chase 80% peak indefinitely.
+  Keep cross-producer xs equality, SYM dequant one-hot checks, fp64 tolerance and complete row/BM invariance coverage.
+  Migrate any remaining relevant test_qmm.py/test_qwen27_qmm.py cases with DEV; CUDA parity tests remain cuda_only.
+  Benchmark N x K:
+    Qwen: 5120x17408, 17408x5120, 10240x5120, 248320x5120 BF16, 48x5120 BF16.
+    Nemotron: 10304x2688, 2688x4096, 131072x2688 BF16.
+  Include M=1 and realistic windows {2,4,8,12,16}, warm/cold conditions and the bytes model.
+  Report whole-window latency, time per verified row, host/device timing, launch count, spills and effective GB/s.
+  No model tokens/s claim before engine measurements. A native N1 rewrite is outside this task.
+
+STEP 2: K0 isolated native build system
+  Implement src/tensorfold/xpu/build.py and integrate existing tools/xpu/build_ext.sh, package data *.sycl/*.hpp,
+  tests/test_packaging.py and manifest compatibility. Runtime container has no icpx and loads prebuilt extensions.
+  Build in DLE 2026.1's separate host/build environment; hash source/compiler/torch/SYCL compatibility.
+  Flags: -fsycl -fsycl-targets=intel_gpu_bmg_g31 -O3 -fp-model=precise -ffp-contract=off.
+  ESIMD: -Xsycl-target-backend=intel_gpu_bmg_g31 "-options '-vc-codegen'".
+  Validate G31 AOT and multi-kernel linking. If needed, build a spir64 fallback in the isolated build environment;
+  device-runtime JIT of that artifact must not invoke icpx inside the Python/server process. Record the working route.
+  Launch on c10::xpu::getCurrentXPUStream().queue(); retain compatible Python _ext() signatures.
+  Native smoke: add, SG16 permute_group_by_xor butterfly, BF16 DPAS 8x16x16 versus a reference.
+  Add implemented smoke to env, inspect IGC dpas encoding, and read a green B70 bundle.
+
+STEP 3: K1 GDN tree, replay and chain
+  References: cuda/kernels/gdn.cu, gdn_prefill.cu, gdn.py; qwen3_5/cuda/reference.py::_gdn.
+  Shapes: 48 value heads, dk=dv=128, FP32 state (48,128,128) per layer, 48 layers.
+  T0: reuse host schedule tables; one shared XPU step/reduction for serial/tree/replay/chain, explicit FMA/rounding.
+  Replay uses a stacked state tensor with layer indices, avoiding pointer casts. Pin lane mapping/reduction.
+  Persistent-state recurrence can DEVICE_LOST: probe small RB tiles, large GRF and hoisted state stores;
+  synchronize after launches in bounded tests. Stop the GPU queue on failure as specified above.
+  If T0 is unstable, prepare an N0 SYCL alternative after K0: SG16 x 8 floats for dk=128, register state, bounded SLM
+  tree slots, xor butterflies 8->1 and replay across layers. Both alternatives are developed serially.
+  Selection: TF_XPU_KERNEL_GDN=triton|native through xpu/select.py. An N0 experiment does not bypass the >=10%
+  versus qualified T1 promotion rule or authorize N1 work.
+  Migrate test_gdn.py and GDN cases in test_qwen27_forward.py/test_qwen27_prefill.py.
+  kernels:gdn: windows 1/4/12, branching trees up to 12 nodes, replay/commit, chunking and multiple streams.
+  Count actual state/scratch/replay traffic, not just nominal tensor size.
+
+STEP 4: recipe A portability and K4 head-row adapters
+  - attention.py _paths: bounded for replacing while; addressing probe; sensitive launches disable fusion.
+  - draft_attention.py: signed pointer tables/residency; _block_attention lanes, GRF and spills.
+  - glue.py _attn_prep: host-precomputed cos/sin; retain canonical xs producer equality.
+  - DFlash2 preparation, convolution, attention and append kernels.
+  - prefill_attention: XPU Triton path for all required dimensions; verify D=256 spill evidence and tune it.
+    The old 67,712-byte spill/0.33-TFLOPS observation must be refreshed from the relevant bundle; do not assume it
+    describes the current kernel. Zero spills is a target, not a claimed result.
+  - Add stored-INT4/BF16 head-row selection for DFlash2/MTP. qmm_fast.rows/matmul_rows currently assume tiled CUDA
+    weights. Test contiguous/disjoint/boundary spans and ordering against corresponding full-head outputs.
+    Retain the parent head arithmetic plan when output width changes. Clearly reject unsupported single-GPU
+    matmul_partial; no CUDA extension fallback. This is adapter work, not WS5 engine wiring.
+  Migrate test_attention.py, test_prefill_attention.py, test_qwen27_draft_attention.py,
+  test_qwen27_dflash2_blocks.py and test_qwen27_glue.py as needed, preserving cuda_only comparisons.
+
+STEP 5: K5.T0 prompt GEMM, both recipes
+  SYM g64/g128, fp16/bf16 scales, explicit dequant-to-BF16 and fixed-tile DPAS FP32 accumulation over K.
+  Document prompt rounding separately from decode. Prove chunked/resumed == one-shot across boundaries and tail tiles.
+  Implement/migrate prompt-matmul tests and an implemented kernels suite. FP8 remains refused.
+
+STEP 6: K3 grouped MoE experts, recipe B
+  References: cuda/experts.cu, experts_prefill.cu, experts_pack.cu, experts.cuh;
+  nemotron_h/cuda/reference.py::moe. 128 routed plus 2 shared halves; 8 slots/token.
+  Up 1856x2688 with relu-squared, down 2688x1856, primary SYM g64 FP16 scales.
+  K3a: stable expert-ID argsort, bincount/cumsum and integer plan; preserve original pair order and item tiling.
+  K3b: torch pack_xpu with documented Intel layout; no CUDA fragment-layout assumption or >=4-GB allocation.
+  K3c: Triton grouped decode GEMV, canonical fixed-order xs, decode FMA contract and stable slot accumulation.
+  K3d: grouped prompt GEMM, separate rounded-BF16 contract, DPAS, relu-squared up/BF16 down epilogues.
+  Cover supported format matrix, empty/tied experts, tails, row/window invariance and prompt chunking.
+  Migrate test_experts.py and MoE cases of test_nemotron_kernels.py; add kernels:experts tests and benchmark.
+
+STEP 7: K2 Mamba-2 prompt scan and Nemotron portability
+  Replace scan_rows.cu with a chunk-invariant Triton chain using documented dt clamp/softplus, decay, state update,
+  reduction, gate and BF16 rounding order; validate against nemotron_h/cuda/reference.py::mamba.
+  Prompt bits need chunk/resume invariance, not decode parity. Use the same DEVICE_LOST discipline as K1;
+  prepare a bounded N0 SYCL alternative if needed after recovery, without N1 optimization.
+  Verify mamba _conv/_scan replay/window equality; double-buffer _conv_commit BASE rather than rely on debug_barrier.
+  Port attention _merge's 3D reshape; verify router DPAS and stable expert-ID ties.
+  Sampler _keyed: runtime range instead of long static_range, FP64/uint64 correctness against
+  engine/exact_sampling.py over 100,000 fixed-key draws; preserve supported sampling modes.
+  Migrate test_nemotron_kernels.py and non-graph test_nemotron_forward.py cases; add kernels suite for prompt scan.
+
+STEP 8: kernel hand-off; stop at this boundary
+  Update KERNEL_MAP.md, STATUS.md, cards and guide findings with exact-SHA qualification, T0/T1/N0 status,
+  coverage gaps, per-shape timings/spills/lanes/DPAS and bugs with minimal repros.
+  Identify WS3b loader and WS5 adapter prerequisites. If an end-to-end profile does not yet exist, label any native
+  priority based on microbenchmarks provisional rather than claiming a measured share of decode time.
+  Retain WS6 candidates: grouped projections, shared activation sums, state residency, replay fused into verify,
+  measured launch reduction and graphs only after eager equality. Those are future tasks, not authorized here.
+  Future WS5/WS6 metrics: TTFT, serial latency, draft/verify/commit cost, acceptance and time per emitted token.
+  Preserve the >=10% native promotion rule. Do not start WS5 or N1 unless separately asked.
+
+== Reporting after every step ==
+Give commit SHA, bundle path, actual pass/fail/missing/skipped coverage, key measurements, toolchain hash,
+CUDA/MLX preservation evidence and any [UNVERIFIED] findings. Distinguish measured data, derived traffic and hypotheses.
+A passing ancestor, compiler-metadata flag or theoretical roofline does not establish current-head correctness or speed.

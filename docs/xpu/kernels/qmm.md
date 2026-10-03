@@ -78,7 +78,9 @@ alone == in window (M in {1, 2, 15, 16, 17, 33, 65, 129}, any position) | BM-inv
 ## Roofline target on B70
 
 Decode is bandwidth-bound: `bytes = N*K/2 + scales + x`. Peak 608 GB/s. T0 goal: correct. N1 goal (K4.N): >= 80% of
-608 GB/s at M = 1 on 5120 x 17408 (`PORT_PLAN.md` K4). 27B: about 14 GB of weights per token.
+608 GB/s at M = 1 on 5120 x 17408 (`PORT_PLAN.md` K4). Recipe traffic must be computed from loaded
+weights/scales, the 2.543 GB BF16 head, recurrent state, KV and workspace; checkpoint size alone is not
+a tokens/s model.
 
 ## Measurements
 
@@ -103,8 +105,9 @@ M x BM x split-K for the SYM and bf16 kernels, SYM dequant exact, fp64 tolerance
 
 Timings are per-launch means of 20 queued launches through the Python wrapper (sym: plus the split-K reduce launch).
 Every small shape sits on a 117-125 us floor (in_proj_a/b moves 0.5 MB in 117 us; Nemotron in_proj and out_proj take
-the same time for 14.7 and 5.5 MB), so their % of peak measures launch latency, not bandwidth. `triton-smoke`'s
-`launch_latency` probe splits that floor into host submit and device time. The A shapes above the floor (down
+the same time for 14.7 and 5.5 MB). This suggests fixed wrapper/submission/launch costs, but does not identify
+the cause. `triton-smoke`'s `launch_latency` probe splits host submit and device time; its current-head bundle
+must be inspected before assigning that floor to GPU launch latency. The A shapes above the floor (down
 1302 us, gate/up 775 us, qkv 764 us) are genuinely slow: 6-10% of peak, spilling 5-9 KB at 256 GRF. M=1 and M=16
 cost the same because the dot pads M to BM = 32. T1 (`num_warps`, `grf_mode`, BN, split-K per shape) is the next step.
 
@@ -112,9 +115,17 @@ cost the same because the dot pads M to BM = 32. T1 (`num_warps`, `grf_mode`, BN
 
 - Resolved on da2a34f: the BM sweep (16..128) is bitwise row-invariant on this shape, and xs from `_group_sums`,
   `_add_rmsnorm` and `_swiglu` is equal.
-- 4-bit decode is far from the roofline (above); the A shapes spill 5-9 KB.
+- 4-bit decode is far from the roofline (above); the A shapes spill 5-9 KB. Run one bounded, shape-only T1
+  pass after current-head qualification, then return to missing correctness kernels. Test M=1/2/4/8/12/16
+  and retain the full invariance sweep; do not runtime-dispatch FMA vs DPAS by M.
+- `55d2095` adds recipe-shape coverage and `f569957` adds timing probes. Neither has a bundle in the index
+  inspected for this documentation revision; the `da2a34f` pass does not qualify those descendant changes.
+- The `da2a34f` summary's glue/prompt-attention "Bitwise break" entries are absent artifacts from omitted
+  suites. They are missing coverage, not measured mismatches; combined current-head qualification is pending.
 - A ~120 us per-launch floor would dominate decode (several launches per layer); source pending `launch_latency`.
-- `qmm_fast.rows`, `matmul_rows` and `matmul_partial` take tiled (CUDA) weights only; SYM weights stay N-major, so the
-  XPU engine (WS5) must not route them there.
+- `qmm_fast.rows` and `matmul_rows` assume tiled CUDA weights; add stored-SYM/BF16 row-selection adapters
+  before WS5, with contiguous/disjoint/boundary-span equality against full-head slices. Retain the parent
+  arithmetic plan when row selection changes output width. Reject unsupported single-GPU `matmul_partial`
+  explicitly; do not enter a CUDA extension.
 - The SYM contract computes `P*s - 8*s*xs`, which cancels when `q` sits near 8; the fp64 tolerance (2^-7 of the max)
   passes, but the A/B against `dot(x, q - 8) * s` noted above is still open.

@@ -5,7 +5,27 @@ Recipes:
 - **B:** Nemotron 3.5 Lightning 30B-A3B W4A16 + MTP (`families/nemotron_h`).
 
 Paths are under `src/tensorfold/`. Port IDs (K0–K7) refer to [PORT_PLAN.md](PORT_PLAN.md) §4. The Status column is
-kept up to date by the Analyst agent.
+kept up to date from exact-SHA B70 bundles.
+
+## Current qualification snapshot
+
+See [STATUS.md](STATUS.md) for bundle paths and limits, and the
+[kernel-engineer prompt](prompts/kernel-engineer.txt) for the next bounded task. The
+[upstream atlas](reports/tensorfold-kernel-atlas-2026-10-02.html) covers v0.6.3 as research; this fork retains its
+v0.6.0 baseline and A/B scope.
+
+| Area | Verified evidence | Remaining work |
+|---|---|---|
+| K4 decode SYM/BF16 | T0 on `da2a34f`: g64/g128, fp16/bf16 scales, producer equality, 31 QMM tests | current-head coverage/timing, bounded T1, stored/BF16 head-row adapters |
+| K6 prompt attention / glue | selected migrated checks on `c32b417` | full recipe coverage, D=256 spills/tuning |
+| K0 native build | build script exists; Python build/loader absent | isolated AOT/spir64 build and native smoke |
+| K1 GDN | no XPU implementation | tree/replay/chain T0, N0 alternative if necessary |
+| K3 grouped experts | no XPU implementation | plan, pack, decode and prompt T0 |
+| K2 prompt scan | no XPU implementation | chain T0 plus Nemotron decode/commit portability |
+| WS5 / e2e | no qualified recipe engine | separate authorization after kernel/loader hand-off |
+
+Ancestor bundles qualify only their tested cases and SHA. Current-head recipe-shape tests and timing probes remain
+pending until their bundle is inspected. Missing suite artifacts are coverage gaps, not observed bitwise mismatches.
 
 Kinds:
 - **CUDA**: native nvcc extension, loaded via `cuda/build.load`. **Not available on XPU**; needs a T0 replacement.
@@ -89,12 +109,12 @@ bf16 conv tail `(3,10240)`.
 | Op | Kernel | Kind | XPU |
 |---|---|---|---|
 | re-quantize draft weights at load | `quantize4` → on XPU: SYM int4 g64 | torch | WS3b/K4 |
-| linears | `qmm_fast.matmul` / `F.linear` (small) | CUDA/torch | K4 T0 path |
+| linears | `qmm_fast.matmul` / upstream `F.linear` (small) | CUDA/torch | K4 SYM/BF16 path; no XPU `F.linear` |
 | q/k norm + rope | `_prep_kernel` | Triton | port |
 | dynamic conv | `_dconv_kernel` | Triton | port |
 | block attention | `draft_attention._block_attention` (**int64 pointer table**) | Triton | port + pointer probe |
 | context append | `draft_attention._append` | Triton | port |
-| draft head | `qmm_fast.matmul_rows` over head row spans | CUDA | K4 (bf16 head) |
+| draft head | `qmm_fast.matmul_rows` over head row spans | CUDA | K4 BF16/stored-row adapter still required |
 | top-k | `torch.topk(16)` → host `draft_tree.best_first` | torch | – |
 
 ### Sampling (`cuda/sampling.py`)
@@ -147,7 +167,9 @@ Shapes:
 
 ### MTP drafting (`mtp.py::MTPHead._round`)
 Same kernels as above. The draft head over the draft-id subset is built from `draft_ids.txt` by untile/index/tile, then
-the head matmul. On XPU it is built from the BF16 head rows instead (no `tile()`). Commit is lazy: the next window's
+the head matmul. XPU needs BF16 head-row selection without `tile()`, tested against full-head slices with a
+consistent arithmetic plan. The adapter is a WS4 hand-off prerequisite, not implemented by ordinary `matmul`.
+Commit is lazy: the next window's
 `_conv`/`_scan` replays the kept rows.
 
 ---

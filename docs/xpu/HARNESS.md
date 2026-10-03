@@ -213,7 +213,8 @@ model_cache: /models
 branch, `timeout_min` bounds the run, and `model_cache` supplies the box's model-cache
 path. Keep this file small and only request implemented tiers.
 
-`env`, `unit-host`, `triton-smoke`, `unit-xpu`, `kernels:glue` and `kernels:prefill-attention` execute real checks.
+`env`, `unit-host`, `triton-smoke`, `unit-xpu`, `kernels:glue`, `kernels:prefill-attention` and `kernels:qmm`
+execute real checks.
 `unit-xpu` sets `TF_TEST_DEVICE=xpu` and runs migrated `tests/cuda` tests. The session `DEV` fixture selects the
 device; auto selection retains CUDA preference. Unmigrated modules and native comparisons remain CUDA-only.
 The first migrated modules are Qwen glue and Triton prefill chunk invariance. More kernels can join by adding their
@@ -221,8 +222,16 @@ module to XPU collection, an `xpu_kernel(name)` marker and a matching benchmark 
 
 Kernel suites select `--xpu-kernel=<name>`, run the existing checks, verify 20 identical launches, then measure
 20 event-timed repeats after five warmups. Compiled lane count, registers, spills and DPAS encoding are recorded
-when available. Byte and FLOP rates use the documented estimates in each JSON; they are microbenchmarks, not
-model throughput. Unknown kernels, missing XPU, empty collection and all-skipped GPU runs fail.
+when available. Record `n_regs_source`: the driver/zebin count or a GRF-mode budget fallback; the latter is
+not measured compiler register usage. `n_spills` is reported in bytes. Byte and FLOP rates use documented
+estimates; effective GB/s is not a hardware DRAM counter or model throughput. Unknown kernels, missing XPU,
+empty collection and all-skipped GPU runs fail.
+
+K4's T0 benchmark queues 20 wrapper calls per sample and reports their per-call mean. Measure host submission
+and event/device time separately before attributing a shared timing floor to GPU launch latency. The
+`f569957` launch-latency probe is implemented but unqualified in the result index inspected for this revision.
+Preserve cache conditions, include group sums/reductions/allocations explicitly, and compare M=1 with realistic
+verify windows. Keep benchmark byte estimates and omitted costs visible.
 
 `triton-smoke` runs the S0 pointer residency round-trip, numpy uint64 oracle, fp64 accuracy/timing, cast ranges,
 in-place `debug_barrier` diagnostics at R=1/2 and the reduced BM=16/NPID_FACTOR check. Mandatory failures stop the
@@ -271,6 +280,19 @@ git show origin/results:runs/xpu--k1--gdn/<sha7>-<utc>/env.json
 In Windows PowerShell 5.1 use separate commands rather than `&&`, and
 `Select-Object -Last 10` rather than `tail`. Read the bundle for the exact SHA being
 evaluated, including failures and bitwise checks, before reporting any hardware result.
+
+### Coverage and regression comparisons
+
+Compare matching cases, toolchain hashes, arithmetic contracts and timing methodologies. Three outcomes are
+separate: an observed numerical failure, a measured performance regression, and missing coverage. A suite
+omitted from a run cannot establish either a pass or a bitwise mismatch. Required missing coverage blocks
+qualification; retain it explicitly rather than silently dropping it from the comparison.
+
+The current `compare.py` still labels absent previously passing kernel JSON as a "Bitwise break". For example,
+`da2a34f` ran QMM but omitted glue/prompt-attention suites, so its summary lists those missing artifacts as
+breaks despite its executed suites passing. Correcting this classification is the next harness task. Until
+then, inspect actual suite lists and JSON manually and rerun affected suites for combined qualification.
+A green suite summary is not evidence that all recipe paths or later descendant commits are qualified.
 
 ## Safety
 
