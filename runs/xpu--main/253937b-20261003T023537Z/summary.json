@@ -1,0 +1,10 @@
+{
+  "branch": "xpu/main",
+  "sha": "253937ba68d8f4ddb63195d3d9079d83224383a7",
+  "status": "pass",
+  "suites": {
+    "env": "pass",
+    "unit-host": "pass"
+  },
+  "pytest_failures": []
+}

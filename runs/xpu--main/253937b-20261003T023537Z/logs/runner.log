@@ -1,0 +1,53 @@
+warning: host RAM below 64 GiB
+env: XPU flags, pointer, Triton add, and host RAM shadow probes passed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=d15fff2fab3936e9ccee747e6b8a84e9dbd7ffa8f9a3ce68695d31b2d4e061b6
+  Stored in directory: /tmp/pip-ephem-wheel-cache-224ieezc/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+XPU flags, pointer, Triton add, and host RAM shadow probes passed
+
+unit-host: host pytest exited 0
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=949ba6d1f5de7d1746cb21587083e1b2dcfeaede52acf0550b124e710a74279a
+  Stored in directory: /tmp/pip-ephem-wheel-cache-9ar8qxsn/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+..................................................................ssssss [ 19%]
+sssss..ss.ss............................................................ [ 24%]
+........................................................................ [ 29%]
+........................................................................ [ 34%]
+.........................s.............................................. [ 39%]
+........................................................................ [ 44%]
+........................................................................ [ 49%]
+........................................................................ [ 54%]
+.....................s....s.s........................................... [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+..................................ssss.................................. [ 79%]
+........................................................................ [ 84%]
+s....................................................................... [ 89%]
+........................................................................ [ 93%]
+...............s..........sss........................................... [ 98%]
+................                                                         [100%]
+1428 passed, 30 skipped in 146.28s (0:02:26)
