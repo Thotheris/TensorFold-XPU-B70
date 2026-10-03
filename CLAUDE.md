@@ -14,9 +14,17 @@ The import above loads the full agent manual. These notes cover how Claude Code 
    throw away. Never commit to `main`.
 
 ## Working style here
-- **This machine is not the B70 box.** You can run `python -m pytest tests -q` and `ruff check src tests` locally. GPU
-  tests only run on the B70 through `.b70/run.yml` and the `results` branch. Say plainly which tests ran where, and
-  never report a GPU result you did not read from a bundle.
+- **Check `hostname` first.** On `5950x-server` you are on the dev box, which holds the B70 itself:
+  - Run dev GPU checks in the pinned runtime image (`tensorfold-xpu:tc-*`).
+  - Qualify by running `tools/xpu/b70_runner.py --once` from the clean clone `~/.local/share/tensorfold-xpu/repo`.
+    `docs/xpu/STATUS.md` has the exact commands.
+  - Keep the GPU idle while the runner runs.
+
+  On any other host there is no B70: run `python -m pytest tests -q` and `ruff check src tests` locally, and leave GPU
+  tests to the runner through `.b70/run.yml` and the `results` branch.
+
+  Either way, say plainly which tests ran where. Dev runs are never results: never report a GPU result you did not
+  read from a bundle.
 - **Exactness first.** Before you write or change a kernel, write down its arithmetic contract in the kernel card.
   After the change, name the invariance tests that cover it. If no test pins the bits you changed, add one.
 - **Keep CUDA unchanged.** When you edit a shared module, re-read the CUDA branch of the code and confirm it is
