@@ -1,0 +1,31 @@
+{
+  "kind": "kernel",
+  "name": "experts-decode-down",
+  "median_us": 549.1042,
+  "p10_us": 547.4896,
+  "p90_us": 550.625,
+  "gbps": 324.2550175358339,
+  "tflops": 2.3259074834976676,
+  "pct_peak_gbps": 53.331417357867416,
+  "pct_peak_tflops": 1.2709876959003648,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 16,
+  "dpas": true,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 5,
+  "repeats_checked": 20,
+  "status": "pass",
+  "timing": "5 launches queued back to back per sample",
+  "shape": {
+    "rows": 16,
+    "slots": 8,
+    "experts_used": 67,
+    "n": 2688,
+    "k": 1856
+  },
+  "bytes_model": "weights of the experts used, once, plus inputs"
+}

@@ -1,0 +1,35 @@
+{
+  "kind": "kernel",
+  "name": "gdn-tree-w12",
+  "median_us": 111.75519999999999,
+  "p10_us": 105.2032,
+  "p90_us": 113.94269999999999,
+  "gbps": 200.59845089982392,
+  "tflops": 0.6755611550961388,
+  "pct_peak_gbps": 32.993166266418406,
+  "pct_peak_tflops": 0.369159101145431,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 10,
+  "repeats_checked": 20,
+  "status": "pass",
+  "shape": {
+    "rows": 12,
+    "slots": 3,
+    "slot_moves": 6,
+    "heads": [
+      16,
+      48
+    ],
+    "dv": 128,
+    "dk": 128
+  },
+  "bytes_model": "states read and written, slot writes and reads, window inputs and outputs",
+  "timing": "10 launches queued back to back per sample, per-launch mean"
+}

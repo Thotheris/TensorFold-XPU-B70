@@ -1,0 +1,483 @@
+warning: host RAM below 64 GiB
+env: XPU flags, pointer, Triton add, and host RAM shadow probes passed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=64c2775ae93d2be514315b8cab2af0ff9f349252c3a096ce374818e24c837ca4
+  Stored in directory: /tmp/pip-ephem-wheel-cache-28xblwx0/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+XPU flags, pointer, Triton add, and host RAM shadow probes passed
+
+triton-smoke: S0 probes: pass
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=ea9dbd49c61f65fb57205fa63c18b8f9f2d500dec470e85fb407af1323d8c467
+  Stored in directory: /tmp/pip-ephem-wheel-cache-r7tll0di/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+{
+  "ok": true,
+  "torch": "2.14.1+xpu",
+  "triton": "3.8.0",
+  "probes": {
+    "available": {
+      "ok": true
+    },
+    "properties": {
+      "ok": true,
+      "has_fp64": true,
+      "sub_group_sizes": [
+        16,
+        32
+      ],
+      "has_subgroup_matrix_multiply_accumulate": true,
+      "has_subgroup_2d_block_io": true,
+      "max_work_group_size": 1024
+    },
+    "vector_add": {
+      "ok": true,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "pointer_round_trip": {
+      "ok": true,
+      "address": 18446697167134392320,
+      "high_bit": true,
+      "signed_table_value": -46906575159296,
+      "source_passed_to_launcher": false,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "uint64_mix": {
+      "ok": true,
+      "elements": 4096,
+      "mismatches": 0,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "fp64_exp_log": {
+      "ok": true,
+      "elements": 100000,
+      "max_exp_relative_error": 2.3183415178888805e-16,
+      "max_log_absolute_error": 7.105427357601002e-15,
+      "median_us": 161.224,
+      "repeats": 10,
+      "accuracy_threshold": 1e-11,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "cast_ranges": {
+      "ok": true,
+      "bf16_ok": true,
+      "input": [
+        0.0,
+        -0.0,
+        1.0,
+        1.00390625,
+        1.01171875,
+        1.401298464324817e-45,
+        1.1754943508222875e-38,
+        0.001953125,
+        0.0009765625,
+        448.0,
+        449.0,
+        464.0,
+        480.0,
+        -480.0,
+        "inf",
+        "-inf",
+        "nan"
+      ],
+      "bf16": [
+        0.0,
+        -0.0,
+        1.0,
+        1.0,
+        1.015625,
+        0.0,
+        1.1754943508222875e-38,
+        0.001953125,
+        0.0009765625,
+        448.0,
+        448.0,
+        464.0,
+        480.0,
+        -480.0,
+        "inf",
+        "-inf",
+        "nan"
+      ],
+      "fp8_e4nv": [
+        0.0,
+        -0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.001953125,
+        0.0,
+        448.0,
+        448.0,
+        448.0,
+        448.0,
+        -448.0,
+        448.0,
+        -448.0,
+        "nan"
+      ],
+      "fp8_status": "range observation; serving refused",
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "debug_barrier": {
+      "ok": true,
+      "hazard_observed": false,
+      "lowering": "work-group barrier with local and global fences",
+      "scope": "disjoint channel blocks; in-place same-workgroup read/write; no cross-workgroup fence",
+      "production_requirement": "orders global memory within a work-group only, never across work-groups",
+      "cases": [
+        {
+          "rows": 1,
+          "control_ok": true,
+          "hazard_ok": true,
+          "hazard_mismatch_launches": 0,
+          "repeats": 20,
+          "control_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          },
+          "hazard_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          }
+        },
+        {
+          "rows": 2,
+          "control_ok": true,
+          "hazard_ok": true,
+          "hazard_mismatch_launches": 0,
+          "repeats": 20,
+          "control_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          },
+          "hazard_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          }
+        }
+      ]
+    },
+    "block_m16": {
+      "ok": true,
+      "hazard_observed": false,
+      "cases": [
+        {
+          "block_m": 16,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 16,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 32,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 32,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 64,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 64,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        }
+      ],
+      "scope": "reduced shrink/expand with runtime N-axis loop; does not certify full MoE-LoRA kernel",
+      "issue": "https://github.com/intel/intel-xpu-backend-for-triton/issues/8121"
+    },
+    "launch_latency": {
+      "ok": true,
+      "batch": 20,
+      "samples": 10,
+      "triton_add": {
+        "host_submit_us": 38.27307482424658,
+        "device_us": 32.85415
+      },
+      "torch_add": {
+        "host_submit_us": 18.638150140759535,
+        "device_us": 13.188824999999998
+      }
+    }
+  },
+  "stopped_at": null
+}
+
+unit-host: pytest exited 0: 1486 passed, 30 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=aaa6bba958b527d2a04b188333040e2cd1c70f8a3012ef4f74c8e62e6a0ab336
+  Stored in directory: /tmp/pip-ephem-wheel-cache-wl64x014/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+..................................................................ssssss [ 19%]
+sssss..ss.ss............................................................ [ 23%]
+........................................................................ [ 28%]
+........................................................................ [ 33%]
+.........................s.............................................. [ 38%]
+........................................................................ [ 42%]
+........................................................................ [ 47%]
+........................................................................ [ 52%]
+.....................s....s.s........................................... [ 57%]
+........................................................................ [ 61%]
+........................................................................ [ 66%]
+........................................................................ [ 71%]
+..................................ssss.................................. [ 76%]
+........................................................................ [ 80%]
+s....................................................................... [ 85%]
+........................................................................ [ 90%]
+...............s..........sss........................................... [ 95%]
+........................................................................ [ 99%]
+..                                                                       [100%]
+1486 passed, 30 skipped in 147.42s (0:02:27)
+
+unit-xpu: pytest exited 0: 169 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=13d91a428e7eda0100a935f98945128e751c9ec888b0c372b43783eafef99c0b
+  Stored in directory: /tmp/pip-ephem-wheel-cache-0dilj3ur/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........................................................................ [ 42%]
+........................................................................ [ 85%]
+.........................                                                [100%]
+=============================== warnings summary ===============================
+tests/cuda/test_gdn.py: 266 warnings
+tests/cuda/test_prefill_attention.py: 25 warnings
+tests/cuda/test_xpu_experts.py: 2 warnings
+tests/cuda/test_xpu_mamba_scan.py: 28 warnings
+  /opt/tf-venv/lib/python3.14/site-packages/triton/compiler/code_generator.py:643: DeprecationWarning: AnnAssign.__init__ missing 1 required positional argument: 'simple'. This will become an error in Python 3.15.
+    init_node = ast.AnnAssign(target=st_target, value=default_value, annotation=annotation)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+169 passed, 88 deselected, 321 warnings in 1434.67s (0:23:54)
+
+kernels:prefill-attention: pytest exited 0: 8 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=8d6e2d6acc3f64f360c5c3c02ef1c3559e7de6dc951bd6e0bc1d55519afc6c9c
+  Stored in directory: /tmp/pip-ephem-wheel-cache-hd7byhd_/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........                                                                 [100%]
+8 passed, 249 deselected in 298.35s (0:04:58)
+
+kernels:qmm: pytest exited 0: 52 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=1cf69051b2a2a7a4469a9d096464757cb5ccf3fe99fba5da245226869a3950ea
+  Stored in directory: /tmp/pip-ephem-wheel-cache-9qmc53iq/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+....................................................                     [100%]
+52 passed, 205 deselected in 765.15s (0:12:45)
+
+kernels:gdn: pytest exited 0: 36 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=a378b91e6a61f13c2a51f3531526b8ff45c8c74719e0d95836c06744af988dcf
+  Stored in directory: /tmp/pip-ephem-wheel-cache-ox29gvmc/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+....................................                                     [100%]
+36 passed, 221 deselected in 19.04s
+
+kernels:experts: pytest exited 0: 7 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=8f29dd73d411d3b046d3c850d534652a67924cad77e10dc08905ad8b50cf27f7
+  Stored in directory: /tmp/pip-ephem-wheel-cache-h17hz3jx/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+.......                                                                  [100%]
+7 passed, 250 deselected in 5.50s
+
+kernels:mamba: pytest exited 0: 6 passed, 0 skipped
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=ba2f085f373f29094908716f12cb9518182112a981f7fc02681eeb6fec46545c
+  Stored in directory: /tmp/pip-ephem-wheel-cache-f8oz2ghn/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+......                                                                   [100%]
+6 passed, 251 deselected in 5.84s
