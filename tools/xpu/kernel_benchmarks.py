@@ -34,6 +34,10 @@ def run_benchmark(name: str, out_dir: Path) -> dict:
         from .bench_qmm import run
 
         return run(out_dir)
+    if name == "gdn":
+        from .bench_gdn import run
+
+        return run(out_dir)
     if name == "glue":
         from tensorfold.families.qwen3_5.cuda import glue as module
 
