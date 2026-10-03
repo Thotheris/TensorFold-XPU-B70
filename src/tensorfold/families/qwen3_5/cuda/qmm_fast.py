@@ -60,7 +60,7 @@ def matmul_rows(x: torch.Tensor, parts: list[QLinear]) -> torch.Tensor:
     """``x`` against row blocks of one weight, with the bits of the stacked weight's matmul (XPU: the parent's)."""
 
     if _xpu_stored(parts[0]):
-        xs = None if parts[0].layout == "dense" else lane_group_sums(x)
+        xs = None if parts[0].layout == "dense" else lane_group_sums(x.contiguous())
         return torch.cat([matmul(x, p, xs) for p in parts], dim=1)
     sk = shared.split_k(sum(p.n for p in parts), parts[0].k, parts[0].gs)
     xs = shared.group_sums(x, parts[0].gs)

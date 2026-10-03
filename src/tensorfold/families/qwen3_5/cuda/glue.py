@@ -217,7 +217,8 @@ def rope_tables(pos: torch.Tensor, inv_freq: torch.Tensor,
 
 def attn_prep(qg: torch.Tensor, k: torch.Tensor, q_norm: torch.Tensor, k_norm: torch.Tensor,
               pos: torch.Tensor, inv_freq: torch.Tensor, eps: float, *, heads: int, kv_heads: int, head_dim: int,
-              mrope_section: tuple[int, int, int] = (11, 11, 10)):
+              mrope_section: tuple[int, int, int] = (11, 11, 10),
+              rope: tuple[torch.Tensor, torch.Tensor] | None = None):
     """qg (W, heads*2*D) [q_h | gate_h] rows, k (W, kv_heads*D): normed and rotated q (W, H, D), k (W, HKV, D)."""
 
     W = qg.shape[0]
@@ -231,7 +232,7 @@ def attn_prep(qg: torch.Tensor, k: torch.Tensor, q_norm: torch.Tensor, k_norm: t
     ko = torch.empty((W, kv_heads, head_dim), dtype=torch.bfloat16, device=qg.device)
     half = inv_freq.numel()
     if qg.device.type == "xpu":
-        cos, sin = rope_tables(pos, inv_freq, mrope_section)
+        cos, sin = rope if rope is not None else rope_tables(pos, inv_freq, mrope_section)   # once per forward
         extra = {"HOST_TRIG": True, "enable_fp_fusion": False}
     else:
         cos = sin = inv_freq

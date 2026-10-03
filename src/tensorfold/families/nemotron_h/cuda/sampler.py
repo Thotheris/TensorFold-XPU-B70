@@ -188,7 +188,8 @@ def sample_candidates(vals: torch.Tensor, ids: torch.Tensor, meta: torch.Tensor,
     cut = (not greedy_mode) and 0.0 < float(s.top_p) < 1.0
     _keyed[(rows,)](vals, ids, meta, out, params.seed, params.fp, prob if prob is not None else out, C1, C2, M1, M2,
                     offset, C=count, CP=triton.next_power_of_2(count), K=k, CUT=cut, GREEDY=greedy_mode,
-                    WRITE_PROB=prob is not None, MINP=(not greedy_mode) and float(s.min_p) > 0.0, num_warps=1)
+                    WRITE_PROB=prob is not None, MINP=(not greedy_mode) and float(s.min_p) > 0.0, num_warps=1,
+                    **({"RUNTIME_LOOPS": True} if vals.device.type == "xpu" else {}))
     return out
 
 

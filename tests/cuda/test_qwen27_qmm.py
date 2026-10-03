@@ -337,3 +337,19 @@ def test_xpu_refuses_row_parallel_partials(DEV):
     with pytest.raises(ValueError, match="not supported on XPU"):
         qmm_fast.matmul_partial(torch.randn((1, 512), device=DEV).bfloat16(), QLinear(words, scales, None, gs=128,
                                                                                          sym=True))
+
+
+@xpu_only
+def test_xpu_head_rows_take_strided_rows_and_derive_the_group(DEV):
+    from tensorfold.families.qwen3_5.cuda import qmm_fast
+    from tensorfold.families.qwen3_5.cuda.weights import QLinear
+
+    words, scales = _sym_weights(DEV, 1000, 5120, 128, 31)
+    head = QLinear(words, scales, None, gs=128, sym=True)
+    parts = [qmm_fast.rows(head, a, b) for a, b in SPANS["disjoint"]]
+    wide = torch.randn((5, 5120 + 64), device=DEV).bfloat16()
+    x = wide[:, 64:]                                     # rows strided by K + 64
+    assert _same(qmm_fast.matmul_rows(x, parts), qmm_fast.matmul_rows(x.contiguous(), parts))
+    # the symmetric lane matmul takes its group size from the scales when none is given
+    assert _same(qmm.lane_matmul(x.contiguous(), words, scales, None), qmm.lane_matmul(x.contiguous(), words, scales,
+                                                                                         None, gs=128))

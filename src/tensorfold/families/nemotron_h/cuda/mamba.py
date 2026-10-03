@@ -59,7 +59,8 @@ def conv(proj, base, raw, xc, conv_w, conv_b, meta, rows: int, *, xd: int) -> No
         raise ValueError("the conv kernel is written for kernel size 4")
     bc = 256
     _conv[(triton.cdiv(cd, bc),)](proj, base, raw, xc, conv_w, conv_b, meta, rows, PROJ=proj.shape[1], XOFF=xd, CD=cd,
-                                  RMAX=raw.shape[1], BC=bc, num_warps=4)
+                                  RMAX=raw.shape[1], BC=bc, num_warps=4,
+                                  **({"enable_fp_fusion": False} if proj.device.type == "xpu" else {}))
 
 
 @triton.jit
@@ -120,41 +121,19 @@ def _conv_commit(P, BASE, R, PROJ: tl.constexpr, XOFF: tl.constexpr, CD: tl.cons
     tl.store(BASE + j[:, None] * CD + ch[None, :], rows, mask=keep)
 
 
-@triton.jit(do_not_specialize=["R"])
-def _conv_commit_into(P, BASE, NEW, R, PROJ: tl.constexpr, XOFF: tl.constexpr, CD: tl.constexpr, BC: tl.constexpr):
-    """``_conv_commit`` into a second buffer (XPU): BASE is only read, so no barrier orders its reads and writes."""
-
-    ch = tl.program_id(0) * BC + tl.arange(0, BC)
-    ok = ch < CD
-    j = tl.arange(0, 4)
-    src = R - 3 + j
-    inside = src >= 0
-    keep = (j < 3)[:, None] & ok[None, :]
-    new = tl.load(P + tl.where(inside, src, 0)[:, None] * PROJ + XOFF + ch[None, :], mask=keep & inside[:, None],
-                  other=0.0)
-    old = tl.load(BASE + tl.where(inside, 0, R + j)[:, None] * CD + ch[None, :], mask=keep & ~inside[:, None],
-                  other=0.0)
-    tl.store(NEW + j[:, None] * CD + ch[None, :], tl.where(inside[:, None], new, old), mask=keep)
-
-
 def conv_rows(proj, base, xc, conv_w, conv_b, rows: int, *, xd: int) -> None:
     cd = base.shape[1]
     br, bc = 16, 128
     _conv_rows[(triton.cdiv(rows, br), triton.cdiv(cd, bc))](proj, base, xc, conv_w, conv_b, rows,
                                                              PROJ=proj.shape[1], XOFF=xd, CD=cd, BR=br, BC=bc,
-                                                             num_warps=4)
+                                                             num_warps=4, **({"enable_fp_fusion": False}
+                                                                             if proj.device.type == "xpu" else {}))
     commit_conv_rows(proj, base, rows, xd=xd)
 
 
 def commit_conv_rows(proj, base, rows: int, *, xd: int) -> None:
     """Keep a prefix's raw convolution window without replaying its projections."""
     cd, bc = base.shape[1], 128
-    if base.device.type == "xpu":                  # double-buffered: tl.debug_barrier as a memory fence is unverified
-        new = torch.empty_like(base)
-        _conv_commit_into[(triton.cdiv(cd, bc),)](proj, base, new, rows, PROJ=proj.shape[1], XOFF=xd, CD=cd, BC=bc,
-                                                  num_warps=4)
-        base.copy_(new)
-        return
     _conv_commit[(triton.cdiv(cd, bc),)](proj, base, rows, PROJ=proj.shape[1], XOFF=xd, CD=cd, BC=bc, num_warps=4)
 
 
@@ -214,7 +193,7 @@ def scan(proj, xc, dt, state, a, d_skip, dt_bias, meta, rows: int, *, heads: int
     _scan[(heads, triton.cdiv(head_dim, SCAN_BD))](
         proj, xc, dt, state, a, d_skip, dt_bias, meta, y, rows, lo, hi, PROJ=proj.shape[1], XD=xd, CD=cd,
         DTOFF=xd + cd, H=heads, DH=head_dim, NG=groups, DS=state_dim, RMAX=xc.shape[1], BD=SCAN_BD,
-        num_warps=SCAN_WARPS)
+        num_warps=SCAN_WARPS, **({"enable_fp_fusion": False} if proj.device.type == "xpu" else {}))
     return y
 
 

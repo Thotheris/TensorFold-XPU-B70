@@ -115,10 +115,11 @@ def attention(qkv, k_cache, v_cache, meta, rows: int, *, heads: int, kv_heads: i
     pl = torch.empty_like(pm)
     _chunk[(rows, kv_heads, max_chunks)](qkv, k_cache, v_cache, meta, po, pm, pl, NQKV=qkv.shape[1], H=heads,
                                          HK=kv_heads, D=head_dim, G=g, CH=CHUNK, NCH=max_chunks,
-                                         SCALE=head_dim ** -0.5, num_warps=4, num_stages=1)
+                                         SCALE=head_dim ** -0.5, num_warps=4, num_stages=1,
+                                         **({"enable_fp_fusion": False} if dev.type == "xpu" else {}))
     out = torch.empty((rows, heads * head_dim), dtype=torch.bfloat16, device=dev)
-    xs = torch.empty((rows, heads * head_dim // 64), dtype=torch.float32, device=dev)
     xpu = dev.type == "xpu"                 # XPU: the canonical group-sum producer, not a 3D reshape reduce
+    xs = out if xpu else torch.empty((rows, heads * head_dim // 64), dtype=torch.float32, device=dev)
     _merge[(rows, kv_heads)](po, pm, pl, meta, out, xs, H=heads, HK=kv_heads, D=head_dim, G=g, CH=CHUNK,
                              NCH=max_chunks, num_warps=4, WRITE_XS=not xpu,
                              **({"enable_fp_fusion": False} if xpu else {}))

@@ -249,3 +249,26 @@ def test_conv_commit_keeps_the_last_three_raw_rows(rows):
     want = torch.cat([base, proj[:, XD:XD + CD]])[-3:].clone()
     M.commit_conv_rows(proj, base, rows, xd=XD)
     assert torch.equal(base, want)
+
+
+def test_candidate_sampler_matches_exact_sampling_with_many_candidates():
+    """``sample_candidates`` (the ranks' union) at top_k 50: every token equals the host rule's."""
+
+    import numpy as np
+
+    from tensorfold.engine.exact_sampling import MARGIN, Sampling, choose_rows
+    from tensorfold.families.nemotron_h.cuda import sampler as S
+
+    rows, top_k = 20_000, 50
+    g = _gen(17)
+    vals = (torch.randn((rows, top_k + MARGIN), generator=g, device=DEVICE) * 3).float()
+    ids = torch.stack([torch.randperm(4096, generator=torch.Generator().manual_seed(r))[:top_k + MARGIN]
+                       for r in range(64)]).to(DEVICE).repeat(rows // 64 + 1, 1)[:rows].contiguous()
+    s = Sampling(temperature=0.7, top_p=0.9, top_k=top_k, min_p=0.0, seed=99)
+    params = S.Params(DEVICE)
+    params.set(s)
+    meta = torch.tensor([5], dtype=torch.int32, device=DEVICE)
+    out = torch.empty(rows, dtype=torch.int32, device=DEVICE)
+    S.sample_candidates(vals, ids, meta, params, out)
+    want = choose_rows(vals.double().cpu().numpy(), ids.cpu().numpy(), np.arange(6, 6 + rows), s)
+    assert int((out.cpu().numpy() != np.asarray(want)).sum()) == 0

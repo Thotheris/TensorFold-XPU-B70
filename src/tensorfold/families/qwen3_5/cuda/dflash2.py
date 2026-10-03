@@ -234,13 +234,16 @@ class DFlash2:
                 raise ValueError("a two-rank drafter needs the MLX checkpoint's 4-bit head")
             sub, self.head_cols = _exl3_sub_head(target.head.layer, spans)
             self.sub_head = Exl3(sub)
-        elif world == 1 and target.head.layout == "tiled":
+        elif world == 1 and (target.head.layout == "tiled" or getattr(target.head, "sym", False) or (
+                target.head.layout == "dense" and target.head.weight.device.type == "xpu")):
+            # tiled CUDA heads and stored XPU heads (SYM or bf16): row views; XPU views keep the full head's plan
             self.sub_rows = [rows(target.head, a, b) for a, b in spans]
         else:
             head = untile(target.head)
             parts = [None if t is None else torch.cat([t[a:b] for a, b in spans]).contiguous()
                      for t in (head.weight, head.scales, head.biases)]
-            self.sub_head = QLinear(*parts, layout=head.layout, gs=head.gs, bits=head.bits)
+            self.sub_head = QLinear(*parts, layout=head.layout, gs=head.gs, bits=head.bits,
+                                    sym=getattr(head, "sym", False))
             del head
         if world == 2:
             half = -(-len(self.head_ids) // 2)
@@ -249,7 +252,7 @@ class DFlash2:
             sub = self.sub_head
             self.sub_head = QLinear(*[None if t is None else t[lo:hi].contiguous()
                                       for t in (sub.weight, sub.scales, sub.biases)],
-                                    layout=sub.layout, gs=sub.gs, bits=sub.bits)
+                                    layout=sub.layout, gs=sub.gs, bits=sub.bits, sym=getattr(sub, "sym", False))
         if isinstance(target.head, QLinear) and target.head.layout == "tiled" and self.sub_rows is None:
             self.sub_head = tile(self.sub_head)
         # Quantized draft projections can change acceptance but never target output.
