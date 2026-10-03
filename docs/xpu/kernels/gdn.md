@@ -70,8 +70,26 @@ q/k/v/g/beta, and writes y; slot traffic only at branching nodes. 48 layers x 3 
 
 ## Measurements
 
-(none yet)
+T0 qualified on `95b3549`, bundle `runs/xpu--main/95b3549-20261003T082711Z` (toolchain hash 858a0a59): `kernels:gdn`
+36 passed, `unit-xpu` 90 passed, no DEVICE_LOST. Every bench case `bitwise_ok` (20 repeats plus a serial / chunked
+check); non-dot kernels at 32 lanes, 1 warp, R = 8 rows a program. Recipe heads (16 key, 48 value, 128 x 128).
+Times are per-launch means of 10 launches queued back to back; GB/s is on the bytes model in `tools/xpu/bench_gdn.py`.
+
+| Case | us | GB/s | % of 608 | spill bytes | n_regs (source) |
+|---|---|---|---|---|---|
+| tree, 1 row | 121.3 | 26.2 | 4.3 | 512 | 128 (grf_mode) |
+| tree, 4-row chain | 121.8 | 26.9 | 4.4 | 512 | 128 (grf_mode) |
+| tree, 12 rows, 3 branches | 125.3 | 178.9 | 29.4 | 448 | 256 (driver) |
+| replay, 48 layers x 4 rows | 603.8 | 500.2 | 82.3 | 0 | 128 (grf_mode) |
+| prompt chain, 512 rows | 1271.0 | 18.3 | 3.0 | 0 | 256 (driver) |
+
+The 1- and 4-row trees sit on the host-submission floor (~120 us, see the qmm card); the prompt chain is latency-bound
+(about 2.5 us a sequential step, 384 programs). Replay reaches 82% of peak.
 
 ## Open issues
 
 - The explicit halving tree costs reshapes per step; measure against `tl.sum` (which is not pinned) at T1.
+- The tree kernel spills 448-512 bytes; T1 candidates: R = 4, 2 warps, grf_mode 256 (R and warps change no bits).
+- The prompt chain is about 2.5 us a step; a chunked (WY / UT) form would change the arithmetic contract, so it needs
+  its own card and tests (prompt need not equal verify, but must stay chunk-invariant).
+- K1.N0 (SYCL, SG16 x 8 strided floats) is not started; T0 is stable, so it waits for K0-based N0 work.

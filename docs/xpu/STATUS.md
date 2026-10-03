@@ -11,6 +11,8 @@ Refresh it from `origin/results:index.jsonl` before starting kernel work. The
 |---|---|---|---|
 | `c32b417` | `runs/xpu--main/c32b417-20261003T050422Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention | pass; register reporting fix and selected migrated checks |
 | `da2a34f` | `runs/xpu--main/da2a34f-20261003T054251Z` | env, unit-host, unit-xpu, kernels:qmm | pass on executed suites; unit-xpu 37 passed, QMM 31 passed |
+| `02b52bc` | `runs/xpu--main/02b52bc-20261003T080109Z` | env, triton-smoke, unit-host, unit-xpu (native ext mounted) | pass; K0: AOT `intel_gpu_bmg_g31` hello extension, env native smoke exact (add, SG16 butterfly, bf16 DPAS), IGC dump holds `dpas`; unit-xpu 54. `15d4611` before it was red on env (probe imported tensorfold) |
+| `95b3549` | `runs/xpu--main/95b3549-20261003T082711Z` | env, triton-smoke, unit-host, unit-xpu, kernels:gdn | pass; K1.T0 GDN tree/replay/chain, unit-xpu 90, gdn 36, no DEVICE_LOST; replay 48x4 at 82% of 608 GB/s ([card](kernels/gdn.md)) |
 | `44a106d` | `runs/xpu--main/44a106d-20261003T071529Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; unit-host 1479 passed / 30 skipped, unit-xpu 51, glue 3, prefill-attention 3, QMM 45; qualifies `55d2095`, `f569957`, `d3008cb`, K4.T1 `f54f223`, compare fix `f1aefb4` |
 
 K4.T0 supports symmetric INT4 g64/g128, fp16/bf16 scales and row-invariant BF16 GEMV. The inspected QMM
@@ -49,13 +51,13 @@ Launch reduction is WS6 work. Effective GB/s uses the bytes model, not measured 
 
 1. Done on `44a106d`: current-head qualification, missing-versus-failed coverage, the launch-floor breakdown.
 2. Done on `44a106d`: the bounded K4.T1 pass (zero spills, windows 1-16, host/device split).
-3. K0 isolated AOT/spir64 build and native loader/smoke; no compiler in the Triton runtime.
-4. K1 GDN tree/replay/chain T0; prepare N0 alternative if recurrence instability requires it.
+3. Done on `02b52bc`: K0 isolated AOT/spir64 build and native loader/smoke; no compiler in the Triton runtime.
+4. T0 done on `95b3549`: K1 GDN tree/replay/chain T0; prepare N0 alternative if recurrence instability requires it.
 5. Recipe A portability, deterministic BF16/stored-INT4 head-row adapters and K5 prompt GEMM.
 6. K3 expert plan/pack/decode/prompt, then K2 prompt scan and Nemotron portability.
 7. Hand off exact-SHA kernel coverage and loader/adapter prerequisites. WS5/N1 require a separate request.
 
-K0 Python build/loader, K1, K2 prompt scan and K3 have no XPU implementation in the inspected tree.
+K2 prompt scan and K3 have no XPU implementation yet; K0 and K1.T0 are qualified (above).
 Head-row selection in `qmm_fast.rows`/`matmul_rows` still assumes CUDA tiled weights; ordinary XPU matmul
 support does not fix those paths. Preserve the parent arithmetic plan in selected-row tests.
 
