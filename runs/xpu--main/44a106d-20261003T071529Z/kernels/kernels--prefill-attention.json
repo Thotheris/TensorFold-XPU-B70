@@ -1,0 +1,38 @@
+{
+  "kind": "kernel",
+  "name": "prefill-attention",
+  "median_us": 774.5829999999999,
+  "p10_us": 758.906,
+  "p90_us": 786.3019999999999,
+  "gbps": 4.864966052701907,
+  "tflops": 0.33561920155748326,
+  "pct_peak_gbps": 0.8001588902470241,
+  "pct_peak_tflops": 0.18339847079643892,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 67712,
+  "threads_per_warp": 16,
+  "dpas": true,
+  "num_warps": 8,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 1,
+  "shape": {
+    "rows": 129,
+    "heads": 24,
+    "kv_heads": 4,
+    "dim": 256,
+    "prefix": 17
+  },
+  "repeats_checked": 20,
+  "status": "pass",
+  "bytes_model": "unique tensor bytes",
+  "flops_model": "dense arithmetic estimate; transcendental operations excluded",
+  "pytest": {
+    "tests": 3,
+    "passed": 3,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}
