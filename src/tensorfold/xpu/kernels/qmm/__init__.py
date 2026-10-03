@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .config import XPU_CONFIG, LaneConfig, lane_config, split_k
+from .config import XPU_CONFIG, LaneConfig, lane_config, slices, split_k
 
-__all__ = ["XPU_CONFIG", "LaneConfig", "bf16_matmul", "lane_config", "split_k", "sym_matmul"]
+__all__ = ["XPU_CONFIG", "LaneConfig", "bf16_matmul", "lane_config", "slices", "split_k", "sym_matmul"]
 
 
 def __getattr__(name: str):

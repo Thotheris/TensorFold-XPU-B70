@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 
-from .config import LaneConfig, lane_config, split_k
+from .config import LaneConfig, lane_config, slices, split_k
 
 __all__ = ["sym_matmul"]
 
@@ -14,10 +14,12 @@ __all__ = ["sym_matmul"]
 @triton.jit(do_not_specialize=["M", "N", "K", "ldx"])
 def _qmm_sym(X, XS, W, S, OUT, PART, M, N, K, ldx,
              GS: tl.constexpr, SK: tl.constexpr, PER: tl.constexpr, BM: tl.constexpr, BLOCK_N: tl.constexpr,
-             F32: tl.constexpr):
+             F32: tl.constexpr, KSPLIT: tl.constexpr):
     """Program (row tile, column tile, K slice): fma(xs, -8s, fma(P, s, acc)) over its groups in ascending order."""
 
     WPG: tl.constexpr = GS // 8
+    CH: tl.constexpr = GS // KSPLIT              # columns of one chained sub-dot of a group
+    CW: tl.constexpr = CH // 8
     KG = K // GS
     K8 = K // 8
     KX = K // 64
@@ -25,19 +27,23 @@ def _qmm_sym(X, XS, W, S, OUT, PART, M, N, K, ldx,
     pid_s = tl.program_id(2)
     rm = (tl.program_id(0) * BM + tl.arange(0, BM)).to(tl.int64)
     rn = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)).to(tl.int64)
-    rk = tl.arange(0, GS)
-    rw = tl.arange(0, WPG)
+    rk = tl.arange(0, CH)
+    rw = tl.arange(0, CW)
     shifts = tl.arange(0, 8) * 4
     m_ok = rm < M
     n_ok = rn < N
     acc = tl.zeros((BM, BLOCK_N), dtype=tl.float32)
     for i in range(PER):
         g = pid_s * PER + i
-        x = tl.load(X + rm[:, None] * ldx + (g * GS + rk)[None, :], mask=m_ok[:, None], other=0.0)
-        words = tl.load(W + rn[:, None] * K8 + (g * WPG + rw)[None, :], mask=n_ok[:, None], other=0)
-        q = (words[:, :, None] >> shifts[None, None, :]) & 0xF
-        q = tl.reshape(q, (BLOCK_N, GS)).to(tl.float32).to(tl.bfloat16)
-        p = tl.dot(x, tl.trans(q))
+        for h in tl.static_range(KSPLIT):
+            x = tl.load(X + rm[:, None] * ldx + (g * GS + h * CH + rk)[None, :], mask=m_ok[:, None], other=0.0)
+            words = tl.load(W + rn[:, None] * K8 + (g * WPG + h * CW + rw)[None, :], mask=n_ok[:, None], other=0)
+            q = (words[:, :, None] >> shifts[None, None, :]) & 0xF
+            q = tl.reshape(q, (BLOCK_N, CH)).to(tl.float32).to(tl.bfloat16)
+            if h == 0:
+                p = tl.dot(x, tl.trans(q))
+            else:
+                p = tl.dot(x, tl.trans(q), p)
         s = tl.load(S + rn * KG + g, mask=n_ok, other=0.0).to(tl.float32)
         b = s * -8.0
         if GS == 64:
@@ -96,14 +102,14 @@ def sym_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, xs: 
     bm = cfg.bm if bm is None else int(bm)
     if bm not in (16, 32, 64, 128):
         raise ValueError("sym_matmul: row tile must be 16, 32, 64 or 128")
-    sk = int(sk) if sk else cfg.sk or split_k(n, k, gs, cfg.bn)
+    sk = int(sk) if sk else (cfg.sk or split_k(n, k, gs, cfg.bn)) if config else slices(n, k, gs)
     if (k // gs) % sk:
         raise ValueError(f"sym_matmul: {sk} K slices do not divide {k // gs} groups")
     out = torch.empty((m, n), dtype=torch.float32 if f32 else torch.bfloat16, device=x.device)
     part = out if sk == 1 else torch.empty((sk, m, n), dtype=torch.float32, device=x.device)
     grid = (triton.cdiv(m, bm), triton.cdiv(n, cfg.bn), sk)
     _qmm_sym[grid](x, xs, weight, scales, out, part, m, n, k, x.stride(0), GS=gs, SK=sk, PER=(k // gs) // sk, BM=bm,
-                   BLOCK_N=cfg.bn, F32=f32, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
+                   BLOCK_N=cfg.bn, F32=f32, KSPLIT=cfg.ksplit, num_warps=cfg.num_warps, num_stages=cfg.num_stages,
                    grf_mode=cfg.grf_mode, enable_fp_fusion=False)
     if sk > 1:
         total = m * n

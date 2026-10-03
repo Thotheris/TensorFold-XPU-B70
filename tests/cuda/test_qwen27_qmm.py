@@ -142,13 +142,13 @@ def test_head_row_views_give_the_stacked_copy_bits(DEV, m):
 def test_sym_rows_do_not_depend_on_row_count_tile_or_position(DEV, n, k, gs, f32):
     """The unrounded fp32 sums are compared as well: bf16 rounding hides most reduction-order differences."""
 
-    from tensorfold.xpu.kernels.qmm import split_k, sym_matmul
+    from tensorfold.xpu.kernels.qmm import slices, split_k, sym_matmul
 
     words, scales = _sym_weights(DEV, n, k, gs, n + k)
     x = torch.randn((max(SYM_ROWS), k), generator=torch.Generator(device=DEV).manual_seed(7), device=DEV).bfloat16()
     xs = qmm.group_sums(x)
     perm = torch.randperm(max(SYM_ROWS), generator=torch.Generator().manual_seed(3)).to(DEV)
-    for sk in sorted({1, split_k(n, k, gs)}):
+    for sk in sorted({1, split_k(n, k, gs), slices(n, k, gs)}):
         def run(rows, xs_rows, bm=None, sk=sk):
             return sym_matmul(rows, words, scales, xs_rows, gs=gs, sk=sk, bm=bm, f32=f32)
 
@@ -256,13 +256,13 @@ def test_sym_qlinear_takes_the_symmetric_path(DEV):
 @pytest.mark.parametrize("f32", [True, False], ids=["fp32", "bf16"])
 @pytest.mark.parametrize("n,k", BF16_SHAPES + BF16_HEADS)
 def test_bf16_gemv_rows_do_not_depend_on_row_count_tile_or_position(DEV, n, k, f32):
-    from tensorfold.xpu.kernels.qmm import bf16_matmul, split_k
+    from tensorfold.xpu.kernels.qmm import bf16_matmul, slices, split_k
 
     g = torch.Generator(device=DEV).manual_seed(n + k)
     w = torch.randn((n, k), generator=g, device=DEV, dtype=torch.bfloat16)
     x = torch.randn((max(SYM_ROWS), k), generator=g, device=DEV).bfloat16()
     perm = torch.randperm(max(SYM_ROWS), generator=torch.Generator().manual_seed(3)).to(DEV)
-    for sk in sorted({1, split_k(n, k, 64)}):
+    for sk in sorted({1, split_k(n, k, 64), slices(n, k, 0)}):
         alone = torch.cat([bf16_matmul(x[r:r + 1], w, sk=sk, bm=16, f32=f32) for r in range(max(SYM_ROWS))])
         for bm in (16, 32, 64, 128):
             for m in SYM_ROWS:

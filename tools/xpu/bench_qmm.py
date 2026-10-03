@@ -45,7 +45,7 @@ def _make_weights(torch, n: int, k: int, gs: int):
 def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path) -> dict:
     from tensorfold.families.qwen3_5.cuda import qmm
     from tensorfold.xpu.kernels.qmm import bf16 as bf16_module
-    from tensorfold.xpu.kernels.qmm import bf16_matmul, split_k, sym_matmul
+    from tensorfold.xpu.kernels.qmm import bf16_matmul, lane_config, slices, sym_matmul
     from tensorfold.xpu.kernels.qmm import lane as lane_module
 
     weights = _make_weights(torch, n, k, gs)
@@ -96,8 +96,9 @@ def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path) -> di
                         out_dir=out_dir / "kernels", triton_kernel=capture.compiled, bitwise_ok=equal, batch=BATCH)
     finally:
         setattr(module, name, original)
-    sk = split_k(n, k, gs or 64)
-    metrics.update(shape={"n": n, "k": k, "gs": gs, "m": m, "dtype": "bf16" if gs == 0 else "sym-int4", "sk": sk},
+    cfg = lane_config(n, k, gs)
+    metrics.update(shape={"n": n, "k": k, "gs": gs, "m": m, "dtype": "bf16" if gs == 0 else "sym-int4"},
+                   config={**vars(cfg), "sk": slices(n, k, gs)},
                    repeats_checked=20, rows_checked=m, weight_copies=len(copies), status="pass",
                    bytes_model="weights + scales + x + out, one pass; weights cycled over copies larger than the LLC",
                    timing=f"{BATCH} launches queued back to back per sample, per-launch mean")

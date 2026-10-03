@@ -1,4 +1,4 @@
-# qmm  (K4, kernel engineer, status: T0)
+# qmm  (K4, kernel engineer, status: T1)
 
 Op: decode matmul `y = x @ W.T` for 4-bit symmetric weights (`lane_matmul`), plus a bf16-weight GEMV for the BF16 `lm_head`
 and `linear_attn.in_proj_a/b`.
@@ -57,8 +57,14 @@ y = bf16_rne( ((acc_0 + acc_1) + ...) )                      # ascending slices;
 
 ## Row, tile and split rules
 
-- `BN = 64`. `SK` is `split_k(n, k, gs)`: a function of the weight shape only. BM, `num_warps`, `num_stages` and
-  `grf_mode` come from the same shape-only table (`xpu/kernels/qmm/config.py`); none is tuned at runtime.
+- Every launch constant comes from `lane_config(n, k, gs)` and `slices(n, k, gs)` (`xpu/kernels/qmm/config.py`):
+  the `XPU_CONFIG` entry for the recipe shapes, else the default for the weight's kind. BM, BN, `num_warps`,
+  `num_stages`, `grf_mode`, `ksplit` and the K slices are functions of the weight shape only; none is tuned at run time.
+- `ksplit` splits a group's dot into chained sub-dots, `p = dot(x_h, q_h, p)` in ascending K. Each sub-dot is whole
+  DPAS K steps, and on the B70 the chain gives the same bits as one dot over the group (T1 sweep: every `ksplit` at
+  the T0 split was bit-equal to T0 on fp32 outputs).
+- Changing the K slices changes the bits by design (different partial sums); the table's slices are part of the
+  contract, and the tests run every shape at 1, `split_k` and the production slices.
 - Row invariance means a row's bits do not depend on M, its position in the window, the other rows, or the grid padding.
   BM is forced to {16, 32, 64, 128} in the tests to prove the dot does not change the bits per row.
 
@@ -110,6 +116,23 @@ the cause. `triton-smoke`'s `launch_latency` probe splits host submit and device
 must be inspected before assigning that floor to GPU launch latency. The A shapes above the floor (down
 1302 us, gate/up 775 us, qkv 764 us) are genuinely slow: 6-10% of peak, spilling 5-9 KB at 256 GRF. M=1 and M=16
 cost the same because the dot pads M to BM = 32. T1 (`num_warps`, `grf_mode`, BN, split-K per shape) is the next step.
+
+### T1 configuration (sweeps on the B70, dev runs; the bundle numbers replace these when the run lands)
+
+Method: `kbench`-style back-to-back launches, weights cycled over copies larger than the 24 MB LLC, every config checked
+bit-equal on fp32 outputs against the T0 config at the same slices. Small single-warp programs (1 warp of 16 lanes,
+BM = BN = 16 or 32) remove the spills; the chained sub-dots cut the live `q` tile.
+
+| Weight | T1 config | M=1 % of 608 GB/s (T0) |
+|---|---|---|
+| A down 5120 x 17408 g128 | bm16 bn32 1 warp ksplit 4, 4 slices | 62.5 (5.8) |
+| A gate/up 17408 x 5120 g128 | bm16 bn16 1 warp ksplit 4, 4 slices (T0: 1) | 53.7 (9.8) |
+| A qkv 10240 x 5120 g128 | bm16 bn16 1 warp ksplit 8, 2 slices | 36.8 (5.8) |
+| B in_proj 10304 x 2688 g64 | bm16 bn32 1 warp ksplit 2, 2 slices | 19.5 (19.4), launch-bound |
+| B out_proj 2688 x 4096 g64 | bm16 bn32 1 warp ksplit 4, 4 slices | 7.9 (7.7), launch-bound |
+| bf16 heads (default for bf16) | bm16 bn32 2 warps 2 stages | 82-84 at M=1 and M=16 (57-59) |
+
+The bf16 optimum at M=1 alone (4 warps, 86-90%) fell to 37% at M=16, so the bf16 default is scored on M=1 + M=16.
 
 ## Open issues
 

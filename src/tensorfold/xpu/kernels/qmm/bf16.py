@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 
-from .config import BK, LaneConfig, lane_config, split_k
+from .config import BK, LaneConfig, lane_config, slices, split_k
 from .lane import _reduce
 
 __all__ = ["bf16_matmul"]
@@ -57,7 +57,7 @@ def bf16_matmul(x: torch.Tensor, weight: torch.Tensor, *, sk: int | None = None,
     bm = cfg.bm if bm is None else int(bm)
     if bm not in (16, 32, 64, 128):
         raise ValueError("bf16_matmul: row tile must be 16, 32, 64 or 128")
-    sk = int(sk) if sk else cfg.sk or split_k(n, k, BK, cfg.bn)
+    sk = int(sk) if sk else (cfg.sk or split_k(n, k, BK, cfg.bn)) if config else slices(n, k, 0)
     if (k // BK) % sk:
         raise ValueError(f"bf16_matmul: {sk} K slices do not divide {k // BK} chunks")
     out = torch.empty((m, n), dtype=torch.float32 if f32 else torch.bfloat16, device=x.device)

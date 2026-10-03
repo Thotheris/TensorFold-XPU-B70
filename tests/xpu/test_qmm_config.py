@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from tensorfold.xpu.kernels.qmm import XPU_CONFIG, LaneConfig, lane_config, split_k
+from tensorfold.xpu.kernels.qmm import XPU_CONFIG, LaneConfig, lane_config, slices, split_k
 from tools.xpu.kbench import ManualTimer, bench
 
 RECIPE = [(5120, 17408, 128), (17408, 5120, 128), (10240, 5120, 128), (10304, 2688, 64), (2688, 4096, 64)]
 
 
 def test_launch_constants_take_no_row_count():
-    for fn in (lane_config, split_k):
+    for fn in (lane_config, split_k, slices):
         assert {"m", "rows", "x"}.isdisjoint(inspect.signature(fn).parameters), fn.__name__
     assert list(inspect.signature(lane_config).parameters) == ["n", "k", "gs"]
     assert isinstance(lane_config(5120, 17408, 128), LaneConfig)
@@ -52,3 +52,11 @@ def test_batched_timing_reports_the_per_launch_mean(tmp_path: Path):
     assert payload["median_us"] == pytest.approx(2000.0)      # samples of 4 launches: 2000, 1000, 3000 us each
     with pytest.raises(ValueError):
         bench(fn=lambda: None, nbytes=1, flops=0, name="bad", out_dir=tmp_path, batch=0, timer=ManualTimer([1.0]))
+
+
+@pytest.mark.parametrize("n,k,gs", RECIPE + [(248320, 5120, 0), (48, 5120, 0), (1000, 3072, 128), (700, 1856, 64)])
+def test_every_shape_gets_a_whole_split_and_whole_sub_dots(n, k, gs):
+    cfg, sk = lane_config(n, k, gs), slices(n, k, gs)
+    assert (k // (gs or 64)) % sk == 0 and cfg.bm in (16, 32, 64, 128) and cfg.bn in (16, 32, 64, 128)
+    if gs:
+        assert gs % cfg.ksplit == 0 and (gs // cfg.ksplit) % 16 == 0       # each sub-dot is whole DPAS K steps
