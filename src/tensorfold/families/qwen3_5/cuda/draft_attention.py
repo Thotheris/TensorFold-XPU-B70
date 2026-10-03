@@ -8,6 +8,11 @@ import torch
 import triton
 import triton.language as tl
 
+from tensorfold.accel import signed_pointer
+
+# XPU: the (G*LP, D) fp32 accumulator needs more lanes and the large register file (shape-only, never row count)
+XPU_BLOCK = {"num_warps": 8, "num_stages": 2, "grf_mode": "256", "enable_fp_fusion": False}
+
 
 @triton.jit
 def _block_attention(Q, KB, VB, TABLE, LENS, O, scale, window, R,
@@ -81,15 +86,16 @@ def block_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, keys: Seq
         if kc.shape != vc.shape or kc.shape[0] != kv_heads or kc.shape[2] != dim or not kc.is_contiguous() \
                 or not vc.is_contiguous() or kc.dtype != torch.bfloat16 or (kc.data_ptr() | vc.data_ptr()) % 16:
             raise ValueError("contexts are contiguous, 16-byte aligned bf16 [Hkv, n, D] keys and values")
-    host = torch.tensor([p for kc, vc in zip(keys, values) for p in (kc.data_ptr(), vc.data_ptr())] +
+    host = torch.tensor([signed_pointer(p) for kc, vc in zip(keys, values) for p in (kc.data_ptr(), vc.data_ptr())] +
                         [kc.shape[1] for kc in keys], dtype=torch.int64).pin_memory()
     dev = host.to(q.device, non_blocking=True)
     table, lens = dev[:2 * streams], dev[2 * streams:].to(torch.int32)
     out = torch.empty((rows, heads * dim), dtype=torch.bfloat16, device=q.device)
     group = heads // kv_heads
+    launch = XPU_BLOCK if q.device.type == "xpu" else {"num_warps": 4, "num_stages": 2}
     _block_attention[(streams, kv_heads)](q, k, v, table, lens, out, scale, window, rows, G=group, HKV=kv_heads,
                                           L=length, LP=max(16, triton.next_power_of_2(length)), D=dim,
-                                          BN=64, CAUSAL=causal, num_warps=4, num_stages=2)
+                                          BN=64, CAUSAL=causal, **launch)
     return out
 
 
@@ -127,13 +133,15 @@ def append(new: torch.Tensor, olds: Sequence[torch.Tensor | None], sizes: Sequen
         n = 0 if old is None else old.shape[1]
         keep = min(window, n + add)
         out = torch.empty((heads, keep, dim), dtype=new.dtype, device=new.device)
-        table += [out.data_ptr() if old is None else old.data_ptr(), out.data_ptr()]
+        table += [signed_pointer(out.data_ptr() if old is None else old.data_ptr()), signed_pointer(out.data_ptr())]
         meta += [n, add, first, keep]
         outs.append(out)
         first += add
     host = torch.tensor(table + meta, dtype=torch.int64).pin_memory()
     dev = host.to(new.device, non_blocking=True)
     streams = len(outs)
+    xpu = {"enable_fp_fusion": False} if new.device.type == "xpu" else {}
     _append[(streams, heads, triton.cdiv(max(o.shape[1] for o in outs), 64))](dev[:2 * streams], dev[2 * streams:], new,
-                                                                              rows, H=heads, D=dim, BR=64, num_warps=4)
+                                                                              rows, H=heads, D=dim, BR=64, num_warps=4,
+                                                                              **xpu)
     return outs

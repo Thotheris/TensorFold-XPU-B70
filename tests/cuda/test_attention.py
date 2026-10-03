@@ -6,25 +6,30 @@ import random
 import pytest
 import torch
 
-if not torch.cuda.is_available():
-    pytest.skip("CUDA only", allow_module_level=True)
+from tests.devices import DEV as DEVICE
+from tests.devices import device_available
+
+if not device_available():
+    pytest.skip("needs CUDA or XPU", allow_module_level=True)
 
 from tensorfold.cuda.kernels import attention as shared  # noqa: E402
 
+pytestmark = pytest.mark.xpu_kernel("attention")
+
 
 def _inputs(w: int, p: int, *, h: int = 24, hk: int = 4, d: int = 256, seed: int = 0):
-    gen = torch.Generator(device="cuda").manual_seed(910 + w + p + seed)
-    q = torch.randn((w, h, d), generator=gen, device="cuda").bfloat16()
-    kn = torch.randn((w, hk, d), generator=gen, device="cuda").bfloat16()
-    vn = torch.randn((w, hk, d), generator=gen, device="cuda").bfloat16()
-    kc = torch.randn((p + 5, hk, d), generator=gen, device="cuda").bfloat16()    # capacity past the committed keys
-    vc = torch.randn((p + 5, hk, d), generator=gen, device="cuda").bfloat16()
+    gen = torch.Generator(device=DEVICE).manual_seed(910 + w + p + seed)
+    q = torch.randn((w, h, d), generator=gen, device=DEVICE).bfloat16()
+    kn = torch.randn((w, hk, d), generator=gen, device=DEVICE).bfloat16()
+    vn = torch.randn((w, hk, d), generator=gen, device=DEVICE).bfloat16()
+    kc = torch.randn((p + 5, hk, d), generator=gen, device=DEVICE).bfloat16()    # capacity past the committed keys
+    vc = torch.randn((p + 5, hk, d), generator=gen, device=DEVICE).bfloat16()
     return q, kn, vn, kc, vc
 
 
 def _attend(q, kn, vn, caches, trees, lengths, scale):
-    plan = shared.plan(trees, lengths, q.shape[1] // kn.shape[1], "cuda")
-    offs = torch.tensor(shared.offsets(caches, "cuda"), dtype=torch.int64, device="cuda").view(-1, 2)
+    plan = shared.plan(trees, lengths, q.shape[1] // kn.shape[1], DEVICE)
+    offs = torch.tensor(shared.offsets(caches, DEVICE), dtype=torch.int64, device=DEVICE).view(-1, 2)
     return shared.attention(q, kn, vn, offs, plan, scale=scale)
 
 
@@ -112,6 +117,29 @@ def test_a_padded_plan_gives_the_exact_plans_bits(w, p, context):
     want = _attend(q, kn, vn, [(kc, vc)], [parents], [p], 1 / 16)
     flat, items, chunks = shared.padded_host(parents, context, q.shape[1] // kn.shape[1])
     flat[w + 2], flat[w + 3] = p, -(-(p + w) // shared.CHUNK)
-    plan = shared.from_packed(torch.tensor(flat, dtype=torch.int32, device="cuda"), 1, w, items, chunks)
-    offs = torch.tensor(shared.offsets([(kc, vc)], "cuda"), dtype=torch.int64, device="cuda").view(-1, 2)
+    plan = shared.from_packed(torch.tensor(flat, dtype=torch.int32, device=DEVICE), 1, w, items, chunks)
+    offs = torch.tensor(shared.offsets([(kc, vc)], DEVICE), dtype=torch.int64, device=DEVICE).view(-1, 2)
     assert torch.equal(shared.attention(q, kn, vn, offs, plan, scale=1 / 16), want)
+
+
+@pytest.mark.skipif(DEVICE != "xpu", reason="the XPU DPAS lowering")
+def test_xpu_score_and_value_dots_lower_to_dpas(monkeypatch):
+    """Both dot kernels compile to DPAS (an N < 16 or other rejected shape falls back to FMA silently)."""
+
+    compiled = {}
+    for name in ("_shared", "_tail"):
+        kernel = getattr(shared, name)
+
+        class Capture:
+            def __getitem__(self, grid, kernel=kernel, name=name):
+                def launch(*args, **kwargs):
+                    compiled[name] = kernel[grid](*args, **kwargs)
+                    return compiled[name]
+                return launch
+
+        monkeypatch.setattr(shared, name, Capture())
+    inputs = _inputs(4, 600)
+    _attend(*inputs[:3], [inputs[3:]], [[-1, 0, 1, 2]], [600], 1 / 16)
+    for name in ("_shared", "_tail"):
+        ttgir = compiled[name].asm["ttgir"]
+        assert "#ttig.dpas" in ttgir or "#triton_intel_gpu.dpas" in ttgir, name

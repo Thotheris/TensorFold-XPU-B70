@@ -153,8 +153,14 @@ def host_empty_cache(device=None) -> None:
         getattr(torch._C, "_host_emptyCache", lambda: None)()
 
 
+def signed_pointer(address: int) -> int:
+    """A device address as the signed int64 with the same bits (B70 addresses reach 2^63; CUDA's are unchanged)."""
+
+    return address - (1 << 64) if address >= 1 << 63 else address
+
+
 __all__ = [
     "Event", "Stream", "api", "current_stream", "device_guard", "device_type", "empty_cache", "graphs_supported",
     "host_empty_cache", "is_available", "is_discrete", "mem_get_info", "memory_allocated", "memory_reserved", "name",
-    "pinnable", "set_allocator_settings", "set_device", "stream", "synchronize",
+    "pinnable", "set_allocator_settings", "set_device", "signed_pointer", "stream", "synchronize",
 ]

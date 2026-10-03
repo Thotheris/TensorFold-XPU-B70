@@ -38,6 +38,26 @@ def _paths(PARENTS, PATHS, DEPTHS, MAXD: tl.constexpr):
 
 
 @triton.jit
+def _paths_bounded(PARENTS, PATHS, DEPTHS, MAXD: tl.constexpr):
+    """``_paths`` as bounded loops (XPU: data-dependent while loops crash triton-xpu, #8189); the same integers."""
+
+    node = tl.program_id(0)
+    cur = node
+    depth = 0
+    for _ in range(MAXD):
+        live = cur >= 0
+        depth += tl.where(live, 1, 0)
+        cur = tl.where(live, tl.load(PARENTS + tl.maximum(cur, 0)), cur)
+    tl.store(DEPTHS + node, depth)
+    cur = node
+    for i in range(MAXD):
+        slot = depth - 1 - i
+        live = slot >= 0
+        tl.store(PATHS + node * MAXD + tl.maximum(slot, 0), cur, mask=live)
+        cur = tl.where(live, tl.load(PARENTS + tl.maximum(cur, 0)), cur)
+
+
+@triton.jit
 def _tile(q, k, v, m, l, o, valid, scale: tl.constexpr):
     scores = tl.dot(q, tl.trans(k)).to(tl.float32) * scale
     scores = tl.where(valid[None, :], scores, float("-inf"))
@@ -219,20 +239,25 @@ def from_packed(dev: torch.Tensor, streams: int, width: int, n_items: int, chunk
     parents = dev[width + 4 * streams + 3 * n_items:width + 4 * streams + 3 * n_items + width]
     paths = torch.empty((width, MAX_NODES), dtype=torch.int32, device=dev.device)
     depths = torch.empty((width,), dtype=torch.int32, device=dev.device)
-    _paths[(width,)](parents, paths, depths, MAXD=MAX_NODES, num_warps=1)
+    if dev.device.type == "xpu":
+        _paths_bounded[(width,)](parents, paths, depths, MAXD=MAX_NODES, num_warps=1)
+    else:
+        _paths[(width,)](parents, paths, depths, MAXD=MAX_NODES, num_warps=1)
     return Plan(rows, table, items, parents, paths, depths, chunks, width)
 
 
 def base(device) -> torch.Tensor:
     """A fixed bf16 tensor that cache offsets are measured from (so an empty cache still has a valid offset)."""
 
+    from tensorfold import accel
+
     device = torch.device(device)
-    return _base(device.index if device.index is not None else torch.cuda.current_device())
+    return _base(device.type, device.index if device.index is not None else accel.api(device.type).current_device())
 
 
 @lru_cache(maxsize=None)
-def _base(index: int) -> torch.Tensor:
-    return torch.zeros(64, dtype=torch.bfloat16, device=torch.device("cuda", index))
+def _base(kind: str, index: int) -> torch.Tensor:
+    return torch.zeros(64, dtype=torch.bfloat16, device=torch.device(kind, index))
 
 
 def offsets(caches: Sequence[tuple[torch.Tensor, torch.Tensor]], device) -> list[int]:
@@ -260,23 +285,25 @@ def attention(q: torch.Tensor, k_nodes: torch.Tensor, v_nodes: torch.Tensor, off
     if not (w == p.width and d in (128, 256) and k_nodes.shape == (w, hk, d) and v_nodes.shape == k_nodes.shape
             and h % hk == 0 and h // hk <= QUERY_TILE):
         raise ValueError("unsupported attention shape")
-    if any(x.dtype != torch.bfloat16 or not x.is_cuda or not x.is_contiguous() for x in (q, k_nodes, v_nodes)):
-        raise ValueError("q and node keys and values must be contiguous CUDA bf16 tensors")
+    if any(x.dtype != torch.bfloat16 or x.device.type not in ("cuda", "xpu") or not x.is_contiguous()
+           for x in (q, k_nodes, v_nodes)):
+        raise ValueError("q and node keys and values must be contiguous GPU bf16 tensors")
     origin = base(q.device)
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError("scale must be positive and finite")
     g = h // hk
+    xpu = {"enable_fp_fusion": False} if q.device.type == "xpu" else {}     # CUDA keeps its launches as they were
     partial_o = torch.empty((p.chunks, w, h, d), dtype=torch.float32, device=q.device)
     partial_m = torch.empty((p.chunks, w, h), dtype=torch.float32, device=q.device)
     partial_l = torch.empty_like(partial_m)
     if p.items.shape[0]:
         _shared[(p.items.shape[0] * hk,)](q, origin, origin, offs, p.streams, p.items, partial_o, partial_m, partial_l,
-                                          w, H=h, HK=hk, D=d, G=g, CH=CHUNK, SCALE=scale, num_warps=4, num_stages=1)
+                                          w, H=h, HK=hk, D=d, G=g, CH=CHUNK, SCALE=scale, num_warps=4, num_stages=1, **xpu)
     tails = 1 + -(-MAX_NODES // CHUNK)
     _tail[(w, hk, tails)](q, k_nodes, v_nodes, origin, origin, offs, p.streams, p.rows, p.paths, p.depths,
                           partial_o, partial_m, partial_l, w, H=h, HK=hk, D=d, G=g, CH=CHUNK, MAXD=MAX_NODES,
-                          SCALE=scale, num_warps=4, num_stages=1)
+                          SCALE=scale, num_warps=4, num_stages=1, **xpu)
     out = torch.empty_like(q)
     _merge[(w, hk, d // MERGE_COLUMNS)](partial_o, partial_m, partial_l, out, p.streams, p.rows, w, H=h, D=d, G=g,
-                                        DS=MERGE_COLUMNS, num_warps=4)
+                                        DS=MERGE_COLUMNS, num_warps=4, **xpu)
     return out
