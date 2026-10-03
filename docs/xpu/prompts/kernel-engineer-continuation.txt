@@ -1,0 +1,33 @@
+You are continuing the kernel-engineer work for the TensorFold -> Intel Arc Pro B70 (XPU) port.
+Repository: github.com/Thotheris/TensorFold-XPU-B70, branch xpu/main. Rules: AGENTS.md, CLAUDE.md,
+docs/xpu/prompts/kernel-engineer.txt (exactness, XPU rules, B70 loop) and docs/xpu/STATUS.md (current state).
+
+== Machine and loop (verified 2026-10-03) ==
+- This machine IS the B70 box (CLAUDE.md's "not the B70 box" line is stale). Dev runs use the pinned image:
+    docker run --rm --device /dev/dri --group-add $(stat -c %g /dev/dri/renderD128) --user $(id -u):$(id -g) \
+      -e HOME=/tmp/home -e PYTHONPATH=/src/src:/src -e TF_TEST_DEVICE=xpu -v $PWD:/src:ro -w /src \
+      tensorfold-xpu:tc-349b7f516e06 python -m pytest -p no:cacheprovider tests/cuda -q --xpu-kernel=<group>
+  Host suite: the same image with -e TF_TEST_DEVICE=cpu ... pytest tests -q --host-only (1485 passed, 30 skipped).
+  Dev runs are never reported as results.
+- Qualification: push to origin/xpu/main, then in the clean clone ~/.local/share/tensorfold-xpu/repo
+  (git pull --ff-only): D=$(TF_XPU_BUILD_IMAGE=tensorfold-xpu-build:dle-2026.1-81b58de60235 bash tools/xpu/build_ext_image.sh
+  | grep TF_XPU_EXT_DIR | cut -d= -f2) and python3 tools/xpu/b70_runner.py --once --image tensorfold-xpu:tc-349b7f516e06
+  --mode container --native-ext "$D". Read origin/results:runs/xpu--main/<sha7>-<utc>/ (summary.md, logs, kernels/*.json).
+  Keep the GPU idle while the runner runs. Edit .b70/run.yml in the same commit to request the suites a change needs
+  (kernels:glue, prefill-attention, qmm, gdn, prompt, experts, mamba exist).
+- Lint with ruff 0.12 default rules (fork paths clean; upstream has a 163-error baseline - add none).
+
+== State (all qualified; see STATUS.md and KERNEL_MAP.md section 0) ==
+K0 build/loader done (02b52bc). K1 GDN T0 (95b3549). K2 Mamba prompt scan T0, K3 experts T0, K5 prompt GEMM T0
+(3a28fb4). K4 decode T1 + head-row views (44a106d, 40c074b). K6 + Qwen/DFlash2/Nemotron portability (b4120ac,
+40c074b, 56756cf). Latest green head: 56756cf; docs head a56bd35.
+
+== Remaining work (in this order; do not start WS5 engine wiring or N1 native kernels unless the owner asks) ==
+1. Bounded T1 passes, one kernel per commit, keeping every invariance test green:
+   - K6 D=256 prompt attention spills ~71 KB: chain the QK dot over D halves (bits must stay equal; test first).
+   - K5 prompt GEMM per-shape BM/BN/warps (20 TFLOPS today); K3 prompt kernels likewise.
+   - GDN tree kernel spills 448-512 B (R and num_warps change no bits; sweep them).
+2. Migrate the remaining GPU tests with kernel content: GDN parts of tests/cuda/test_qwen27_forward.py and
+   test_qwen27_prefill.py, non-graph parts of test_nemotron_forward.py (mark engine/CUDA-only cases cuda_only).
+3. Keep STATUS.md, KERNEL_MAP.md and the cards current with bundle-read numbers after every green run.
+4. Before the session's usage runs low, update this file with the new state and stop.
