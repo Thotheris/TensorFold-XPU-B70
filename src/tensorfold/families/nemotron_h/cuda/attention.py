@@ -70,7 +70,7 @@ def _chunk(QKV, KC, VC, META, PO, PM, PL, NQKV: tl.constexpr, H: tl.constexpr, H
 
 @triton.jit
 def _merge(PO, PM, PL, META, OUT, XS, H: tl.constexpr, HK: tl.constexpr, D: tl.constexpr, G: tl.constexpr,
-           CH: tl.constexpr, NCH: tl.constexpr):
+           CH: tl.constexpr, NCH: tl.constexpr, WRITE_XS: tl.constexpr = True):
     r = tl.program_id(0)
     hk = tl.program_id(1)
     limit = tl.load(META) + r + 1
@@ -96,9 +96,11 @@ def _merge(PO, PM, PL, META, OUT, XS, H: tl.constexpr, HK: tl.constexpr, D: tl.c
         m = next_m
     out = (o / den[:, None]).to(tl.bfloat16)
     tl.store(OUT + (r * H + head[:, None]) * D + d[None, :], out, mask=hm[:, None])
-    og = tl.reshape(out.to(tl.float32), (16, D // 64, 64))
-    gi = tl.arange(0, D // 64)
-    tl.store(XS + r * (H * D // 64) + head[:, None] * (D // 64) + gi[None, :], tl.sum(og, axis=2), mask=hm[:, None])
+    if WRITE_XS:
+        og = tl.reshape(out.to(tl.float32), (16, D // 64, 64))
+        gi = tl.arange(0, D // 64)
+        tl.store(XS + r * (H * D // 64) + head[:, None] * (D // 64) + gi[None, :], tl.sum(og, axis=2),
+                 mask=hm[:, None])
 
 
 def attention(qkv, k_cache, v_cache, meta, rows: int, *, heads: int, kv_heads: int, head_dim: int, max_chunks: int):
@@ -116,6 +118,12 @@ def attention(qkv, k_cache, v_cache, meta, rows: int, *, heads: int, kv_heads: i
                                          SCALE=head_dim ** -0.5, num_warps=4, num_stages=1)
     out = torch.empty((rows, heads * head_dim), dtype=torch.bfloat16, device=dev)
     xs = torch.empty((rows, heads * head_dim // 64), dtype=torch.float32, device=dev)
+    xpu = dev.type == "xpu"                 # XPU: the canonical group-sum producer, not a 3D reshape reduce
     _merge[(rows, kv_heads)](po, pm, pl, meta, out, xs, H=heads, HK=kv_heads, D=head_dim, G=g, CH=CHUNK,
-                             NCH=max_chunks, num_warps=4)
+                             NCH=max_chunks, num_warps=4, WRITE_XS=not xpu,
+                             **({"enable_fp_fusion": False} if xpu else {}))
+    if xpu:
+        from tensorfold.families.qwen3_5.cuda.qmm import group_sums
+
+        xs = group_sums(out)
     return out, xs

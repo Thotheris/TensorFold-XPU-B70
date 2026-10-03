@@ -26,7 +26,7 @@ def _mix(x, m1, m2):
 @triton.jit
 def _keyed(VALS, IDS, META, OUT, SEED, FP, PROB, c1, c2, m1, m2, offset,
            C: tl.constexpr, CP: tl.constexpr, K: tl.constexpr, CUT: tl.constexpr, GREEDY: tl.constexpr = False,
-           WRITE_PROB: tl.constexpr = False, MINP: tl.constexpr = False):
+           WRITE_PROB: tl.constexpr = False, MINP: tl.constexpr = False, RUNTIME_LOOPS: tl.constexpr = False):
     r = tl.program_id(0)
     seed = tl.load(SEED)
     temp = tl.load(FP)
@@ -50,15 +50,24 @@ def _keyed(VALS, IDS, META, OUT, SEED, FP, PROB, c1, c2, m1, m2, offset,
     top = tl.max(tl.where(kept, scaled, float("-inf")), axis=0)
     p = tl.where(kept, tl.exp(scaled - top), 0.0)
     total = tl.sum(tl.where(rank == 0, p, 0.0), axis=0)
-    for k in tl.static_range(1, K):
-        total += tl.sum(tl.where(rank == k, p, 0.0), axis=0)
+    if RUNTIME_LOOPS:                      # XPU: a long static_range unroll aborts IGC; the same order, not unrolled
+        for k in range(1, K):
+            total += tl.sum(tl.where(rank == k, p, 0.0), axis=0)
+    else:
+        for k in tl.static_range(1, K):
+            total += tl.sum(tl.where(rank == k, p, 0.0), axis=0)
     limit = K
     if CUT:
         run = tl.sum(tl.where(rank == 0, p, 0.0), axis=0) / total
         below = tl.where(run < top_p, 1, 0)
-        for k in tl.static_range(1, K):
-            run += tl.sum(tl.where(rank == k, p, 0.0), axis=0) / total
-            below += tl.where(run < top_p, 1, 0)
+        if RUNTIME_LOOPS:
+            for k in range(1, K):
+                run += tl.sum(tl.where(rank == k, p, 0.0), axis=0) / total
+                below += tl.where(run < top_p, 1, 0)
+        else:
+            for k in tl.static_range(1, K):
+                run += tl.sum(tl.where(rank == k, p, 0.0), axis=0) / total
+                below += tl.where(run < top_p, 1, 0)
         limit = below + 1
     if MINP:                               # the tokens within ln(min_p) of the top: a prefix of the rank order
         floor = top + tl.load(FP + 2)
@@ -114,7 +123,8 @@ def keyed(logits: torch.Tensor, meta: torch.Tensor, params: Params, out: torch.T
     cut = (not greedy_mode) and 0.0 < float(s.top_p) < 1.0
     _keyed[(rows,)](vals, ids, meta, out, params.seed, params.fp, prob if prob is not None else out, C1, C2, M1, M2,
                     offset, C=count, CP=triton.next_power_of_2(count), K=k, CUT=cut, GREEDY=greedy_mode,
-                    WRITE_PROB=prob is not None, MINP=(not greedy_mode) and float(s.min_p) > 0.0, num_warps=1)
+                    WRITE_PROB=prob is not None, MINP=(not greedy_mode) and float(s.min_p) > 0.0, num_warps=1,
+                    **({"RUNTIME_LOOPS": True} if logits.device.type == "xpu" else {}))
     return out
 
 
