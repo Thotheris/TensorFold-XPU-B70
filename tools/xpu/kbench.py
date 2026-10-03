@@ -174,10 +174,11 @@ def bench(
     triton_kernel: object = None,
     bitwise_ok: bool | None = None,
     sync: Callable[[], None] | None = None,
+    batch: int = 1,
 ) -> dict[str, Any]:
-    """Warmup calls are untimed and each kernel result is written as JSON."""
-    if warmup < 0 or repeats < 1:
-        raise ValueError("warmup must be nonnegative and repeats must be positive")
+    """Warmup calls are untimed and the result is written as JSON; ``batch`` launches queue back to back per sample."""
+    if warmup < 0 or repeats < 1 or batch < 1:
+        raise ValueError("warmup must be nonnegative; repeats and batch must be positive")
     timer = timer if timer is not None else _XPUTimer()
     for _ in range(warmup):
         fn()
@@ -186,10 +187,11 @@ def bench(
     samples = []
     for _ in range(repeats):
         timer.start()
-        fn()
+        for _ in range(batch):
+            fn()
         if sync is not None:
             sync()
-        samples.append(timer.stop_ms() * 1e3)
+        samples.append(timer.stop_ms() * 1e3 / batch)
     percentiles = percentiles_us(samples)
     payload = {
         "kind": "kernel",
@@ -198,6 +200,7 @@ def bench(
         **rates(median_us=percentiles["median_us"], nbytes=nbytes, flops=flops),
         **triton_kernel_stats(triton_kernel),
         "bitwise_ok": bitwise_ok,
+        "batch": batch,
     }
     filename = re.sub(r"[^A-Za-z0-9._-]", "_", name.replace("/", "_").replace("\\", "_")).strip(".")
     if not filename:

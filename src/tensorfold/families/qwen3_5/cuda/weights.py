@@ -20,6 +20,7 @@ class QLinear:
     rows: int = 0             # N when tiled (the tiled words are padded to 64 columns)
     gs: int = 64              # inputs per quantization group
     bits: int = 4
+    sym: bool = False         # symmetric INT4 (XPU): no biases, w = scales * (q - 8)
 
     @property
     def n(self) -> int:
@@ -36,6 +37,9 @@ class QLinear:
 
     @cached_property
     def fast(self) -> bool:
+        if self.sym:
+            return (self.bits == 4 and self.gs in (64, 128) and self.layout == "mlx" and self.biases is None
+                    and self.scales.dtype in (torch.float16, torch.bfloat16))
         return (self.bits, self.gs) == (4, 64) and self.layout != "dense" and all(
             t.dtype == torch.bfloat16 for t in (self.scales, self.biases))
 

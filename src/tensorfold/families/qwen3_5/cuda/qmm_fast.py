@@ -11,7 +11,7 @@ from .weights import QLinear, Weights
 
 
 def tile(q: QLinear) -> QLinear:
-    if q.layout == "tiled" or not q.fast:
+    if q.layout == "tiled" or not q.fast or q.sym:       # symmetric INT4 (XPU) stays in the stored N-major layout
         return q
     p = shared.pack(q.weight, q.scales, q.biases, 64)
     return QLinear(p.weight, p.scales, p.biases, layout="tiled", rows=q.n)
@@ -49,13 +49,17 @@ def matmul_rows(x: torch.Tensor, parts: list[QLinear]) -> torch.Tensor:
 def matmul(x: torch.Tensor, q: QLinear, xs: torch.Tensor | None = None) -> torch.Tensor:
     """The lane matmul for either layout; both give the same bits."""
 
+    if q.layout == "dense" and x.device.type == "xpu":
+        from tensorfold.xpu.kernels.qmm import bf16_matmul
+
+        return bf16_matmul(x, q.weight)
     if not q.fast:
         from tensorfold.cuda.kernels.affine import matmul as affine_matmul
 
         return affine_matmul(x, q)
     if q.layout == "tiled":
         return shared.matmul(x, q, xs)
-    return lane_matmul(x, q.weight, q.scales, q.biases, xs=xs)
+    return lane_matmul(x, q.weight, q.scales, q.biases, xs=xs, gs=q.gs)
 
 
 def matmul_partial(x: torch.Tensor, q: QLinear, xs: torch.Tensor | None = None) -> torch.Tensor:
@@ -75,15 +79,19 @@ def stack(parts: list[QLinear]) -> QLinear:
 
     if any(q.layout != "mlx" for q in parts):
         raise ValueError("stack the stored layout, then tile")
-    if len({(q.bits, q.gs, q.k, q.scales.dtype, q.biases.dtype) for q in parts}) != 1:
+    if len({_format(q) for q in parts}) != 1:
         raise ValueError("stacked projections must share an affine format and input width")
+    biases = None if parts[0].sym else torch.cat([q.biases for q in parts]).contiguous()
     return QLinear(torch.cat([q.weight for q in parts]).contiguous(), torch.cat([q.scales for q in parts]).contiguous(),
-                   torch.cat([q.biases for q in parts]).contiguous(), gs=parts[0].gs, bits=parts[0].bits)
+                   biases, gs=parts[0].gs, bits=parts[0].bits, sym=parts[0].sym)
+
+
+def _format(q: QLinear) -> tuple:
+    return (q.bits, q.gs, q.k, q.scales.dtype, None if q.biases is None else q.biases.dtype, q.sym)
 
 
 def _stackable(parts: list[QLinear]) -> bool:
-    return (all(q.layout == "mlx" for q in parts)
-            and len({(q.bits, q.gs, q.k, q.scales.dtype, q.biases.dtype) for q in parts}) == 1)
+    return all(q.layout == "mlx" for q in parts) and len({_format(q) for q in parts}) == 1
 
 
 def stack_small(layer) -> None:

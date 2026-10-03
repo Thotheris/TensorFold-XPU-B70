@@ -99,13 +99,17 @@ def group_sums(x: torch.Tensor) -> torch.Tensor:
     return xs
 
 
-def lane_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, biases: torch.Tensor,
+def lane_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, biases: torch.Tensor | None,
                 xs: torch.Tensor | None = None, sk: int | None = None,
-                bm: int | None = None) -> torch.Tensor:
-    """x (M, K) bf16 times the packed 4-bit ``weight`` (N, K/8) transposed -> (M, N) bf16."""
+                bm: int | None = None, gs: int = 64) -> torch.Tensor:
+    """x (M, K) bf16 times the packed 4-bit ``weight`` (N, K/8) transposed -> (M, N) bf16; no ``biases``: symmetric."""
 
     if x.dtype != torch.bfloat16 or x.dim() != 2:
         raise ValueError("lane_matmul: x must be a 2-D bf16 tensor")
+    if biases is None:
+        from tensorfold.xpu.kernels.qmm import sym_matmul
+
+        return sym_matmul(x, weight, scales, group_sums(x.contiguous()) if xs is None else xs, gs=gs, sk=sk, bm=bm)
     m, k = x.shape
     n = weight.shape[0]
     if weight.shape[1] * 8 != k or k % 64:

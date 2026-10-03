@@ -30,6 +30,10 @@ def run_benchmark(name: str, out_dir: Path) -> dict:
 
     if not torch.xpu.is_available():
         raise RuntimeError("requested XPU is unavailable")
+    if name == "qmm":
+        from .bench_qmm import run
+
+        return run(out_dir)
     if name == "glue":
         from tensorfold.families.qwen3_5.cuda import glue as module
 
