@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from .kbench import bench
@@ -21,10 +22,26 @@ CASES = (
     ("nemotron-out-proj", 2688, 4096, 64),
     ("nemotron-head", 131072, 2688, 0),
 )
-ROWS = (1, 16)
+ROWS = (1, 2, 4, 8, 12, 16)  # serial decode and realistic verify windows
 HEADLINE = ("qwen-down", 1)
 CACHE_BYTES = 128 << 20      # weights are cycled over copies of at least this size: the last-level cache is 24 MB
 BATCH = 20                   # launches queued back to back per timing sample, as a decode step queues them
+
+
+def _queued(torch, fn, spin, calls: int = BATCH) -> tuple[float, float]:
+    """Host submit and device time per call: the calls queue behind a long matmul, so device time has no host gaps."""
+    fn()
+    torch.xpu.synchronize()
+    start, end = torch.xpu.Event(enable_timing=True), torch.xpu.Event(enable_timing=True)
+    spin()
+    start.record()
+    t0 = time.perf_counter()
+    for _ in range(calls):
+        fn()
+    host = (time.perf_counter() - t0) / calls * 1e6
+    end.record()
+    torch.xpu.synchronize()
+    return host, float(start.elapsed_time(end)) * 1e3 / calls
 
 
 def _bits(tensor):
@@ -42,7 +59,7 @@ def _make_weights(torch, n: int, k: int, gs: int):
     return words.to(torch.int32), scales
 
 
-def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path) -> dict:
+def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path, spin) -> dict:
     from tensorfold.families.qwen3_5.cuda import qmm
     from tensorfold.xpu.kernels.qmm import bf16 as bf16_module
     from tensorfold.xpu.kernels.qmm import bf16_matmul, lane_config, slices, sym_matmul
@@ -96,12 +113,21 @@ def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path) -> di
                         out_dir=out_dir / "kernels", triton_kernel=capture.compiled, bitwise_ok=equal, batch=BATCH)
     finally:
         setattr(module, name, original)
+    warm = bench(fn=lambda: launch(weights), nbytes=nbytes, flops=2.0 * m * n * k, name=f"qmm-{case}-m{m}-warm",
+                 out_dir=out_dir / "scratch", bitwise_ok=equal, batch=BATCH)
+    host_us, device_us = _queued(torch, timed, spin)
     cfg = lane_config(n, k, gs)
+    sk = slices(n, k, gs)
     metrics.update(shape={"n": n, "k": k, "gs": gs, "m": m, "dtype": "bf16" if gs == 0 else "sym-int4"},
-                   config={**vars(cfg), "sk": slices(n, k, gs)},
+                   config={**vars(cfg), "sk": sk}, launches_per_call=1 if sk == 1 else 2,
+                   us_per_row=metrics["median_us"] / m, warm_median_us=warm["median_us"],
+                   host_submit_us=host_us, device_us=device_us, device_gbps=nbytes / 1e3 / device_us,
+                   device_pct_peak_gbps=100 * nbytes / 1e3 / device_us / 608.0,
                    repeats_checked=20, rows_checked=m, weight_copies=len(copies), status="pass",
                    bytes_model="weights + scales + x + out, one pass; weights cycled over copies larger than the LLC",
-                   timing=f"{BATCH} launches queued back to back per sample, per-launch mean")
+                   timing=(f"median_us: {BATCH} calls back to back per sample, per-call mean, weights cold (cycled); "
+                           "warm_median_us: one weight copy; host_submit_us and device_us: the calls queued behind a "
+                           "long matmul, so device_us has no host gaps"))
     (out_dir / "kernels" / f"qmm-{case}-m{m}.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     return metrics
 
@@ -112,19 +138,70 @@ def run(out_dir: Path) -> dict:
 
     if not torch.xpu.is_available():
         raise RuntimeError("requested XPU is unavailable")
+    big = torch.randn(8192, 8192, device="xpu")
+
+    def spin():
+        return big @ big
+
     results = []
     for case, n, k, gs in CASES:
         for m in ROWS:
-            results.append((case, m, _one(torch, case, n, k, gs, m, out_dir)))
+            results.append((case, m, _one(torch, case, n, k, gs, m, out_dir, spin)))
             torch.xpu.empty_cache()
     headline = next(r for case, m, r in results if (case, m) == HEADLINE)
     summary = {
         **headline, "name": "qmm", "headline": f"{HEADLINE[0]} M={HEADLINE[1]}",
-        "cases": [{"name": r["name"], "median_us": r["median_us"], "gbps": r["gbps"],
-                   "pct_peak_gbps": r["pct_peak_gbps"], "n_spills": r["n_spills"], "n_regs": r["n_regs"],
-                   "threads_per_warp": r["threads_per_warp"], "dpas": r["dpas"], "bitwise_ok": r["bitwise_ok"]}
+        "cases": [{key: r[key] for key in ("name", "median_us", "warm_median_us", "us_per_row", "gbps",
+                                            "pct_peak_gbps", "host_submit_us", "device_us", "device_pct_peak_gbps",
+                                            "launches_per_call", "n_spills", "n_regs", "n_regs_source",
+                                            "threads_per_warp", "dpas", "bitwise_ok")}
                   for _, _, r in results],
+        "host_breakdown": _host_breakdown(torch),
         "bitwise_ok": all(r["bitwise_ok"] for _, _, r in results),
     }
     (out_dir / "kernels" / "qmm.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary
+
+
+def _host_breakdown(torch) -> dict:
+    """Host microseconds per call of the pieces of one split-K SYM call (Nemotron out_proj, M=1)."""
+    from tensorfold.families.qwen3_5.cuda.qmm import group_sums
+    from tensorfold.xpu.kernels.qmm import lane, lane_config, slices, sym_matmul
+    from triton.runtime.driver import driver
+
+    n, k, gs = 2688, 4096, 64
+    cfg, sk = lane_config(n, k, gs), slices(n, k, gs)
+    words, scales = _make_weights(torch, n, k, gs)
+    x = torch.randn((1, k), device="xpu").bfloat16()
+    xs = group_sums(x)
+    out = torch.empty((1, n), device="xpu", dtype=torch.bfloat16)
+    part = torch.empty((sk, 1, n), device="xpu")
+    grid = (1, -(-n // cfg.bn), sk)
+    kwargs = dict(GS=gs, SK=sk, PER=(k // gs) // sk, BM=cfg.bm, BLOCK_N=cfg.bn, F32=False, KSPLIT=cfg.ksplit,
+                  num_warps=cfg.num_warps, num_stages=cfg.num_stages, grf_mode=cfg.grf_mode, enable_fp_fusion=False)
+    args = (x, xs, words, scales, out, part, 1, n, k, k)
+    compiled = lane._qmm_sym[grid](*args, **kwargs)
+    compiled._init_handles()
+    stream = driver.active.get_current_stream(driver.active.get_current_device())
+
+    def per_call(fn, calls=200):
+        for _ in range(10):
+            fn()
+        torch.xpu.synchronize()
+        t0 = time.perf_counter()
+        for _ in range(calls):
+            fn()
+        host = (time.perf_counter() - t0) / calls * 1e6
+        torch.xpu.synchronize()
+        return host
+
+    return {
+        "case": "nemotron-out-proj M=1",
+        "sym_matmul_wrapper_us": per_call(lambda: sym_matmul(x, words, scales, xs, gs=gs)),
+        "triton_jit_launch_us": per_call(lambda: lane._qmm_sym[grid](*args, **kwargs)),
+        "driver_launch_us": per_call(lambda: compiled.run(*grid, stream, compiled.function, compiled.packed_metadata,
+                                                          None, None, None, *args)),
+        "group_sums_us": per_call(lambda: group_sums(x)),
+        "torch_empty_us": per_call(lambda: torch.empty((sk, 1, n), device="xpu")),
+        "launches_per_call": 1 if sk == 1 else 2,
+    }
