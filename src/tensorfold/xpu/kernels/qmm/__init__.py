@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from .config import XPU_CONFIG, LaneConfig, lane_config, slices, split_k
 
-__all__ = ["XPU_CONFIG", "LaneConfig", "bf16_matmul", "lane_config", "slices", "split_k", "sym_matmul"]
+__all__ = ["XPU_CONFIG", "LaneConfig", "bf16_matmul", "lane_config", "prompt_matmul", "slices", "split_k",
+           "sym_matmul"]
 
 
 def __getattr__(name: str):
@@ -14,6 +15,10 @@ def __getattr__(name: str):
         from .lane import sym_matmul
 
         return sym_matmul
+    if name == "prompt_matmul":
+        from .prompt import prompt_matmul
+
+        return prompt_matmul
     if name == "bf16_matmul":
         from .bf16 import bf16_matmul
 
