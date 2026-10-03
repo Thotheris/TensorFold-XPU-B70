@@ -1,1 +1,2 @@
 {"branch":"xpu/main","sha":"d062f4614190fcfa52e72e194fbb3092a956d4a0","sha7":"d062f46","time":"2026-10-03T02:13:23.859740+00:00","status":"fail","bundle":"runs/xpu--main/d062f46-20261003T021323Z","suites":{"env":"error","unit-host":"error"}}
+{"branch":"xpu/main","sha":"c6f94fb1b3f0d41af4517622eb292875fa5a17cb","sha7":"c6f94fb","time":"2026-10-03T02:23:30.007885+00:00","status":"fail","bundle":"runs/xpu--main/c6f94fb-20261003T022330Z","suites":{"env":"pass","unit-host":"fail"}}

@@ -1,0 +1,145 @@
+warning: host RAM below 64 GiB
+env: XPU flags, pointer, Triton add, and host RAM shadow probes passed
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=8a3c1ea551e4205b8a52eec6fb02e0bb897d957a8ab8b3f367e5b008df8349b9
+  Stored in directory: /tmp/pip-ephem-wheel-cache-yxdac0yy/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+XPU flags, pointer, Triton add, and host RAM shadow probes passed
+
+unit-host: host pytest exited 1
+Obtaining file:///src
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: tensorfold
+  Building editable for tensorfold (pyproject.toml): started
+  Building editable for tensorfold (pyproject.toml): finished with status 'done'
+  Created wheel for tensorfold: filename=tensorfold-0.6.0-0.editable-py3-none-any.whl size=23763 sha256=092c6d294886679eebecdae37439e873cc55b5d8e0c9d68076dfb29b14d4ef58
+  Stored in directory: /tmp/pip-ephem-wheel-cache-fk2k6_ui/wheels/02/c7/bd/3c9c4210dc5b9e58e9b44f1c0d7aba86c510d03ee543e925e2
+Successfully built tensorfold
+Installing collected packages: tensorfold
+Successfully installed tensorfold-0.6.0
+........................................................................ [  4%]
+........................F.F............................................. [  9%]
+........................................................................ [ 14%]
+..................................................................ssssss [ 19%]
+sssss..ss.ss............................................................ [ 24%]
+........................................................................ [ 29%]
+........................................................................ [ 34%]
+.........................s.............................................. [ 39%]
+........................................................................ [ 44%]
+........................................................................ [ 49%]
+........................................................................ [ 54%]
+.....................s....s.s........................................... [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+..................................ssss.................................. [ 79%]
+........................................................................ [ 84%]
+s....................................................................... [ 89%]
+........................................................................ [ 94%]
+...............s..........sss........................................... [ 98%]
+...............                                                          [100%]
+=================================== FAILURES ===================================
+________________ test_the_lock_named_is_the_one_torch_waits_on _________________
+
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_the_lock_named_is_the_one0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7661541caac0>
+
+    @pytest.mark.torch
+    def test_the_lock_named_is_the_one_torch_waits_on(tmp_path, monkeypatch):
+        """Real torch, nothing compiled: ``load`` waits on the lock the line names until it is deleted."""
+
+        _gpu(monkeypatch, (12, 1))
+        monkeypatch.setenv("TORCH_EXTENSIONS_DIR", str(tmp_path / "extensions"))
+        lock = tmp_path / "extensions" / "tf_lock_probe" / "lock"      # TORCH_EXTENSIONS_DIR/<name>/lock
+        lock.parent.mkdir(parents=True)
+        lock.write_text("")
+        source = tmp_path / "tf_lock_probe.cpp"
+        source.write_text("int tf_lock_probe() { return 0; }\n")
+        said, ended = [], []
+        monkeypatch.setattr(build, "_say", said.append)
+
+        def start():
+            try:
+                ended.append(build.load(name="tf_lock_probe", sources=[str(source)], verbose=False))
+            except Exception as error:  # noqa: BLE001 - nothing was built, so the import after the wait fails
+                ended.append(error)
+
+        thread = threading.Thread(target=start, daemon=True)
+        thread.start()
+        thread.join(0.5)
+>       assert thread.is_alive() and not ended           # torch is waiting on that file
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert (False)
+E        +  where False = is_alive()
+E        +    where is_alive = <Thread(Thread-88 (start), stopped daemon 130157190518464)>.is_alive
+
+tests/test_cuda_build.py:239: AssertionError
+__________________ test_glm_nonfit_refuses_before_weight_load __________________
+
+tmp_path = PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_glm_nonfit_refuses_before0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x766156104ec0>
+
+    def test_glm_nonfit_refuses_before_weight_load(tmp_path, monkeypatch):
+        torch = pytest.importorskip("torch")
+        from tensorfold.cuda import capacity
+        from tensorfold.families.glm5_next.cuda import engine
+        import sys
+
+        glm = SimpleNamespace(dense_limit=2051, mtp_layers=1, layers=4)
+        weights = SimpleNamespace(Config=SimpleNamespace(read=lambda *a: glm), load=None)
+        monkeypatch.setitem(sys.modules, "tensorfold.families.glm5_next.cuda.weights", weights)
+        monkeypatch.setitem(sys.modules, "tensorfold.families.glm5_next.cuda.decode", SimpleNamespace(Engine=None))
+
+        config = {"max_position_embeddings": 131072, "num_hidden_layers": 2,
+                  "layer_types": ["linear_attention", "full_attention"], "num_attention_heads": 64,
+                  "linear_num_heads": 64, "linear_head_dim": 128, "linear_conv_kernel_dim": 4,
+                  "qk_nope_head_dim": 256, "v_head_dim": 256, "index_head_dim": 128,
+                  "hidden_size": 4096, "vocab_size": 65536, "num_nextn_predict_layers": 1,
+                  "moe_intermediate_size": 1024, "num_experts_per_tok": 8, "n_routed_experts": 288}
+        checkpoint(tmp_path, config, [("model.language_model.layers.0.mlp.experts.0.gate_proj.weight",
+                                      "U32", [65536, 32768], 8 * 1024**3)])
+        monkeypatch.setattr(torch.cuda, "set_device", lambda *a: None)
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a: (6 * 1024**3, 8 * 1024**3))
+        monkeypatch.setattr(capacity, "_meminfo", lambda: None)      # a Spark's MemAvailable would admit it
+        monkeypatch.setattr(weights.Config, "read", lambda *a: glm)
+        monkeypatch.setattr(engine.GlmEngine, "_gather_ints", lambda self, x: [x, x])
+        def load(*a, **kw):
+            pytest.fail("weight allocation was reached before startup admission")
+        monkeypatch.setattr(weights, "load", load)
+        comm = SimpleNamespace(barrier=lambda: None, ready=lambda *a, **k: None)
+        with pytest.raises(ValueError, match="fit|memory|budget"):
+>           engine.GlmEngine(tmp_path, rank=0, master="example", port=29551, context=65536, comm=comm)
+
+tests/test_cuda_capacity.py:70:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/tensorfold/families/glm5_next/cuda/engine.py:178: in __init__
+    w = load(model_dir, rank=rank, mtp=self.mtp_on)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+a = (PosixPath('/tmp/pytest-of-ubuntu/pytest-0/test_glm_nonfit_refuses_before0'),)
+kw = {'rank': 0, 'mtp': True}
+
+    def load(*a, **kw):
+>       pytest.fail("weight allocation was reached before startup admission")
+E       Failed: weight allocation was reached before startup admission
+
+tests/test_cuda_capacity.py:66: Failed
+----------------------------- Captured stdout call -----------------------------
+[tensorfold] CUDA rank 0 startup estimate 16.00 GiB within 27.68 GiB; native 131072, allocated prompt/reply window 65536, cache slots 65544
+=========================== short test summary info ============================
+FAILED tests/test_cuda_build.py::test_the_lock_named_is_the_one_torch_waits_on
+FAILED tests/test_cuda_capacity.py::test_glm_nonfit_refuses_before_weight_load
+2 failed, 1425 passed, 30 skipped in 144.17s (0:02:24)
