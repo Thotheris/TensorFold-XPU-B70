@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-__all__ = ["container_probes", "validate_manifest"]
+__all__ = ["container_probes", "native_smoke", "validate_manifest"]
 
 
 def validate_manifest(path: Path, *, torch: str, sycl: str) -> dict:
@@ -20,6 +20,32 @@ def validate_manifest(path: Path, *, torch: str, sycl: str) -> dict:
         return {"ok": ok, "manifest": manifest, "error": None if ok else "native runtime versions differ"}
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def native_smoke(path: Path) -> dict:
+    """The prebuilt hello extension: an exact add, a sub-group-16 butterfly and one bf16 DPAS against torch."""
+    try:
+        import torch
+
+        from tensorfold.xpu.build import load
+
+        build = json.loads((path / "build.json").read_text(encoding="utf-8")).get("tensorfold_xpu_hello_v1", {})
+        hello = load("tensorfold_xpu_hello_v1")
+        a = torch.randn(1000, device="xpu")
+        b = torch.randn(1000, device="xpu")
+        x = torch.randint(-1000, 1000, (64 * 16,), device="xpu").float()
+        ma = torch.randint(-8, 8, (8, 16), device="xpu").bfloat16()
+        mb = torch.randint(-8, 8, (16, 16), device="xpu").bfloat16()
+        checks = {
+            "add": bool(torch.equal(hello.add(a, b), a + b)),
+            "sg_sum": bool(torch.equal(hello.sg_sum(x), x.reshape(-1, 16).sum(1, keepdim=True).expand(-1, 16)
+                                       .reshape(-1))),
+            "dpas": bool(torch.equal(hello.dpas(ma, mb), ma.float() @ mb.float())),
+        }
+        torch.xpu.synchronize()
+        return {"ok": all(checks.values()), **checks, "mode": build.get("mode"), "igc_dpas": build.get("igc_dpas")}
+    except Exception as exc:  # noqa: BLE001 - a failed native load or launch is probe data
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _launcher_probe(env: dict[str, str]) -> dict:
@@ -70,6 +96,9 @@ def container_probes() -> dict:
         validate_manifest(Path(native), torch=str(torch.__version__), sycl=str(torch.version.xpu))
         if native else {"ok": True, "mounted": False}
     )
+    if native:
+        checks["native_smoke"] = native_smoke(Path(native))
+        checks["native_manifest"]["ok"] = bool(checks["native_manifest"]["ok"] and checks["native_smoke"]["ok"])
     # Requirement probes decide future image slimming, rather than gating on a deliberately absent header.
     checks["pinned_versions"] = {
         "ok": str(torch.__version__) == "2.14.1+xpu" and str(triton.__version__) == "3.8.0"

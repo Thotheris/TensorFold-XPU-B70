@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SHIPPED = {".cu", ".cuh", ".cpp", ".json", ".txt"}       # what the engines read or build at run time
+SHIPPED = {".cu", ".cuh", ".cpp", ".json", ".txt", ".sycl", ".hpp"}       # what the engines read or build
 
 
 def unlisted(pyproject: str, src: Path) -> list[str]:

@@ -63,6 +63,7 @@ where = ["src"]
 "tensorfold.cuda.exl3" = ["*.cu", "*.cuh", "*.cpp"]
 "tensorfold.cuda.nvfp4" = ["*.cu", "*.cpp"]
 "tensorfold.streaming.hostsync" = ["*.cpp", "CMakeLists.txt"]
+"tensorfold.xpu.kernels.hello" = ["*.cpp", "*.sycl", "*.hpp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,28 @@
+# The native-kernel build image: Intel DPC++ 2026.1 plus the pinned torch, never used to run or serve.
+# Kernels built here are mounted into the runtime image (tools/xpu/docker/Dockerfile) by toolchain hash.
+FROM ubuntu:26.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg git python3 python3-venv python3-dev gcc g++ make libdrm2 libnuma1 ocl-icd-libopencl1 \
+    && rm -rf /var/lib/apt/lists/*
+# The runtime image's pinned driver, IGC and ocloc: AOT device code is finalised by the same IGC that runs it.
+COPY tools/xpu/debs.lock /opt/debs.lock
+RUN mkdir /tmp/debs && while IFS='|' read -r package version url digest; do \
+      file="/tmp/debs/${url##*/}"; \
+      curl --fail --location --proto '=https' --tlsv1.2 --output "$file" "$url" && \
+      printf '%s  %s\n' "$digest" "$file" | sha256sum --check - || exit 1; \
+    done < /opt/debs.lock && dpkg -i /tmp/debs/*.deb && rm -rf /tmp/debs
+RUN curl --fail --location --proto '=https' --tlsv1.2 \
+      https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+      | gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg && \
+    echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+      > /etc/apt/sources.list.d/oneAPI.list
+RUN apt-get update && apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp-2026.1 \
+    && rm -rf /var/lib/apt/lists/* && ln -s /opt/intel/oneapi /opt/intel/dle-2026.1
+COPY tools/xpu/constraints.txt /opt/constraints.txt
+RUN python3 -m venv /opt/tf-venv
+ENV PATH=/opt/tf-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN pip install --constraint /opt/constraints.txt torch==2.14.1+xpu --index-url https://download.pytorch.org/whl/xpu && \
+    pip install --constraint /opt/constraints.txt setuptools numpy ninja pytest && pip check
+# build_ext.sh sources the compiler in a subshell; nothing here puts icpx on PATH for Python.
+ENV TF_XPU_PYTHON=/opt/tf-venv/bin/python DLE_PREFIX=/opt/intel/dle-2026.1

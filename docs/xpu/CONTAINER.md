@@ -1,6 +1,6 @@
 # The B70 container
 
-Status: **plan**. Area: Harness (WS2), committed on `xpu/main`. Paths below (`tools/xpu/**`, `docs/xpu/HARNESS.md`)
+Status: **in use** (runtime image since `d062f46`; build image since K0). Area: Harness (WS2), committed on `xpu/main`. Paths below (`tools/xpu/**`, `docs/xpu/HARNESS.md`)
 are as they stand on `xpu/main`.
 
 The B70's userspace toolchain moves from the host (`tools/xpu/bootstrap.sh --apply --system` plus a host venv) into an
@@ -102,15 +102,25 @@ protocol `invoke_suite` uses today.
 
 `health.check_gpu`, the STOP marker and publishing to `results` stay on the host, unchanged.
 
-## 5. Native kernels (after K0)
+## 5. Native kernels (K0)
 
-- `tools/xpu/build_ext.sh` runs on the host, sources DLE 2026.1 in a subshell, and writes
-  `build/xpu-ext/<hash>/` with a manifest. The hash covers the DLE version, the torch version and the source SHA.
-- The runner mounts that directory (§4); `src/tensorfold/xpu/build.py` loads `.so` files from `TF_XPU_EXT_DIR` and never
-  compiles inside the container.
-- `env` fails if the manifest's torch / SYCL versions differ from the image's.
-- Host and image share Ubuntu 26.04, so glibc and libstdc++ match. A self-contained DLE build stage is deferred until a
-  second box needs one.
+- The B70 host has no DLE (`/opt/intel` is absent), so the compiler lives in its own **build image**,
+  `tools/xpu/docker/Dockerfile.build` (`tools/xpu/docker/build.sh build` tags `tensorfold-xpu-build:dle-2026.1-<hash12>`):
+  Ubuntu 26.04, Intel's `intel-oneapi-compiler-dpcpp-cpp-2026.1` from apt.repos.intel.com (linked as
+  `/opt/intel/dle-2026.1`), the runtime image's pinned debs (`debs.lock`: compute-runtime, IGC 2.40, `ocloc`, so AOT
+  device code is finalised by the IGC that runs it) and torch 2.14.1+xpu for the headers. It never runs tests or serves.
+- `tools/xpu/build_ext_image.sh` (with `TF_XPU_BUILD_IMAGE`) runs `tools/xpu/build_ext.sh` inside it: DLE sourced in
+  a subshell, `xpu/build.py::build_aot` builds each extension in its own process (AOT for `intel_gpu_bmg_g31`, then
+  JIT `spir64` if AOT fails), and `build/xpu-ext/<hash>/` gets the `.so` files, `build.json` (mode, errors, whether
+  IGC's AOT dump holds `dpas`) and `manifest.json`. The hash covers the torch/SYCL versions, the compiler and the SHA.
+- The runner mounts that directory (`--native-ext`, §4) at `/opt/tf-ext`; `xpu/build.py::load` imports a `.so` only
+  when the manifest's torch and SYCL versions equal the running ones, and never compiles. The runtime image has no icpx.
+- `env` checks the manifest and runs the hello smoke (`container_probes.native_smoke`): exact add, sub-group-16 xor
+  butterfly, one bf16 DPAS 8x16x16 equal to torch on integer inputs.
+- Dev runs on the B70 (2026-10-03, before the first bundle): AOT for `intel_gpu_bmg_g31` builds and links a module of
+  three kernels (no multi-kernel AOT link failure), IGC's dump of it holds `dpas`, and both the AOT and the JIT
+  `spir64` builds load and pass in the runtime image. AOT is the route; JIT stays as the recorded fallback.
+- Host and image share Ubuntu 26.04, so glibc and libstdc++ match.
 
 ## 6. New `env` probes (run inside the container)
 

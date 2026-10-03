@@ -12,7 +12,8 @@ from tests.devices import DEV, _device_fixture, device_available
 # GLM's engines keep the MTP head beside DFlash2 here (TF_GLM_MTP=1).
 os.environ.setdefault("TF_GLM_MTP", "1")
 
-XPU_MODULES = {"test_qwen27_glue.py", "test_prefill_attention.py", "test_qwen27_qmm.py", "test_qmm.py"}
+XPU_MODULES = {"test_qwen27_glue.py", "test_prefill_attention.py", "test_qwen27_qmm.py", "test_qmm.py",
+               "test_xpu_native_hello.py"}
 
 if not device_available():
     collect_ignore_glob = ["test_*.py"]
