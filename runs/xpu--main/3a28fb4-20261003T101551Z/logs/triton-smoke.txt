@@ -1,0 +1,300 @@
+{
+  "ok": true,
+  "torch": "2.14.1+xpu",
+  "triton": "3.8.0",
+  "probes": {
+    "available": {
+      "ok": true
+    },
+    "properties": {
+      "ok": true,
+      "has_fp64": true,
+      "sub_group_sizes": [
+        16,
+        32
+      ],
+      "has_subgroup_matrix_multiply_accumulate": true,
+      "has_subgroup_2d_block_io": true,
+      "max_work_group_size": 1024
+    },
+    "vector_add": {
+      "ok": true,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "pointer_round_trip": {
+      "ok": true,
+      "address": 18446697167134392320,
+      "high_bit": true,
+      "signed_table_value": -46906575159296,
+      "source_passed_to_launcher": false,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "uint64_mix": {
+      "ok": true,
+      "elements": 4096,
+      "mismatches": 0,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "fp64_exp_log": {
+      "ok": true,
+      "elements": 100000,
+      "max_exp_relative_error": 2.3183415178888805e-16,
+      "max_log_absolute_error": 7.105427357601002e-15,
+      "median_us": 154.14049999999997,
+      "repeats": 10,
+      "accuracy_threshold": 1e-11,
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "cast_ranges": {
+      "ok": true,
+      "bf16_ok": true,
+      "input": [
+        0.0,
+        -0.0,
+        1.0,
+        1.00390625,
+        1.01171875,
+        1.401298464324817e-45,
+        1.1754943508222875e-38,
+        0.001953125,
+        0.0009765625,
+        448.0,
+        449.0,
+        464.0,
+        480.0,
+        -480.0,
+        "inf",
+        "-inf",
+        "nan"
+      ],
+      "bf16": [
+        0.0,
+        -0.0,
+        1.0,
+        1.0,
+        1.015625,
+        0.0,
+        1.1754943508222875e-38,
+        0.001953125,
+        0.0009765625,
+        448.0,
+        448.0,
+        464.0,
+        480.0,
+        -480.0,
+        "inf",
+        "-inf",
+        "nan"
+      ],
+      "fp8_e4nv": [
+        0.0,
+        -0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.001953125,
+        0.0,
+        448.0,
+        448.0,
+        448.0,
+        448.0,
+        -448.0,
+        448.0,
+        -448.0,
+        "nan"
+      ],
+      "fp8_status": "range observation; serving refused",
+      "n_regs": 128,
+      "n_regs_source": "grf_mode",
+      "n_spills": 0,
+      "threads_per_warp": 32,
+      "dpas": false,
+      "num_warps": 4,
+      "grf_mode": "default"
+    },
+    "debug_barrier": {
+      "ok": true,
+      "hazard_observed": false,
+      "scope": "disjoint channel blocks; in-place same-workgroup read/write; no cross-workgroup fence",
+      "production_requirement": "use separate destination; observations do not establish fence semantics",
+      "cases": [
+        {
+          "rows": 1,
+          "control_ok": true,
+          "hazard_ok": true,
+          "hazard_mismatch_launches": 0,
+          "repeats": 20,
+          "control_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          },
+          "hazard_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          }
+        },
+        {
+          "rows": 2,
+          "control_ok": true,
+          "hazard_ok": true,
+          "hazard_mismatch_launches": 0,
+          "repeats": 20,
+          "control_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          },
+          "hazard_kernel": {
+            "n_regs": 128,
+            "n_regs_source": "grf_mode",
+            "n_spills": 0,
+            "threads_per_warp": 32,
+            "dpas": false,
+            "num_warps": 4,
+            "grf_mode": "default"
+          }
+        }
+      ]
+    },
+    "block_m16": {
+      "ok": true,
+      "hazard_observed": false,
+      "cases": [
+        {
+          "block_m": 16,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 16,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 32,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 32,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 64,
+          "npid_factor": 1,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        },
+        {
+          "block_m": 64,
+          "npid_factor": 3,
+          "ok": true,
+          "mismatches": 0,
+          "n_regs": 128,
+          "n_regs_source": "grf_mode",
+          "n_spills": 0,
+          "threads_per_warp": 16,
+          "dpas": true,
+          "num_warps": 4,
+          "grf_mode": "default"
+        }
+      ],
+      "scope": "reduced shrink/expand with runtime N-axis loop; does not certify full MoE-LoRA kernel",
+      "issue": "https://github.com/intel/intel-xpu-backend-for-triton/issues/8121"
+    },
+    "launch_latency": {
+      "ok": true,
+      "batch": 20,
+      "samples": 10,
+      "triton_add": {
+        "host_submit_us": 39.562874735565856,
+        "device_us": 34.01435
+      },
+      "torch_add": {
+        "host_submit_us": 18.712175369728357,
+        "device_us": 13.145824999999999
+      }
+    }
+  },
+  "stopped_at": null
+}

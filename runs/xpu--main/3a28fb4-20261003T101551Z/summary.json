@@ -1,0 +1,15 @@
+{
+  "branch": "xpu/main",
+  "sha": "3a28fb44e8d75fcd863bd13c24bdbbe963e33d08",
+  "status": "pass",
+  "suites": {
+    "env": "pass",
+    "triton-smoke": "pass",
+    "unit-host": "pass",
+    "unit-xpu": "pass",
+    "kernels:prompt": "pass",
+    "kernels:experts": "pass",
+    "kernels:mamba": "pass"
+  },
+  "pytest_failures": []
+}

@@ -1,0 +1,29 @@
+{
+  "kind": "kernel",
+  "name": "mamba-scan-1024",
+  "median_us": 4127.4896,
+  "p10_us": 4108.5208,
+  "p90_us": 4440.9166,
+  "gbps": 11.209820128922917,
+  "tflops": 0.7804321231966278,
+  "pct_peak_gbps": 1.8437204159412695,
+  "pct_peak_tflops": 0.42646564109105345,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 1,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 5,
+  "repeats_checked": 20,
+  "status": "pass",
+  "timing": "5 launches queued back to back per sample",
+  "shape": {
+    "rows": 1024,
+    "heads": 64,
+    "head_dim": 64,
+    "states": 128
+  }
+}

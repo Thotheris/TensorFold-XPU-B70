@@ -1,0 +1,29 @@
+{
+  "kind": "kernel",
+  "name": "prompt-nemotron-in-proj",
+  "median_us": 2868.7185999999997,
+  "p10_us": 2860.5519999999997,
+  "p90_us": 2879.4584,
+  "gbps": 14.404245853880546,
+  "tflops": 19.773207206869298,
+  "pct_peak_gbps": 2.369119383861932,
+  "pct_peak_tflops": 10.805031260584315,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 16,
+  "dpas": true,
+  "num_warps": 8,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 5,
+  "repeats_checked": 20,
+  "status": "pass",
+  "timing": "5 launches queued back to back per sample",
+  "shape": {
+    "m": 1024,
+    "n": 10304,
+    "k": 2688,
+    "gs": 64
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "kind": "kernel",
+  "name": "experts-prompt-up",
+  "median_us": 5325.0208,
+  "p10_us": 5307.364599999999,
+  "p90_us": 5334.9584,
+  "gbps": 65.7373702652955,
+  "tflops": 15.349911187576957,
+  "pct_peak_gbps": 10.812067477844653,
+  "pct_peak_tflops": 8.38792961069779,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 16,
+  "dpas": true,
+  "num_warps": 8,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 5,
+  "repeats_checked": 20,
+  "status": "pass",
+  "timing": "5 launches queued back to back per sample",
+  "shape": {
+    "rows": 1024,
+    "slots": 8,
+    "experts_used": 130,
+    "n": 1856,
+    "k": 2688
+  },
+  "bytes_model": "weights of the experts used, once, plus inputs"
+}

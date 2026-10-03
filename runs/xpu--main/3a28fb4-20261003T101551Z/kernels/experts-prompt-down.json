@@ -1,0 +1,31 @@
+{
+  "kind": "kernel",
+  "name": "experts-prompt-down",
+  "median_us": 6202.1874,
+  "p10_us": 6195.031199999999,
+  "p90_us": 6215.1146,
+  "gbps": 60.45553283346453,
+  "tflops": 13.178994938463163,
+  "pct_peak_gbps": 9.94334421603035,
+  "pct_peak_tflops": 7.2016365783951715,
+  "n_regs": 256,
+  "n_regs_source": "driver",
+  "n_spills": 0,
+  "threads_per_warp": 16,
+  "dpas": true,
+  "num_warps": 8,
+  "grf_mode": "default",
+  "bitwise_ok": true,
+  "batch": 5,
+  "repeats_checked": 20,
+  "status": "pass",
+  "timing": "5 launches queued back to back per sample",
+  "shape": {
+    "rows": 1024,
+    "slots": 8,
+    "experts_used": 130,
+    "n": 2688,
+    "k": 1856
+  },
+  "bytes_model": "weights of the experts used, once, plus inputs"
+}

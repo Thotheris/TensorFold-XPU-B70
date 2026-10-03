@@ -1,0 +1,7 @@
+env: pass
+triton-smoke: pass
+unit-host: pass
+unit-xpu: pass
+kernels:prompt: pass
+kernels:experts: pass
+kernels:mamba: pass
