@@ -1,0 +1,25 @@
+{
+  "kind": "kernel",
+  "name": "glue",
+  "median_us": 139.844,
+  "p10_us": 131.25,
+  "p90_us": 163.073,
+  "gbps": 12.829381310603244,
+  "tflops": 0.008464746431738222,
+  "pct_peak_gbps": 2.110095610296586,
+  "pct_peak_tflops": 0.0046255444982176075,
+  "n_regs": 0,
+  "n_spills": 0,
+  "threads_per_warp": 32,
+  "dpas": false,
+  "num_warps": 4,
+  "bitwise_ok": true,
+  "shape": {
+    "rows": 17,
+    "width": 17408
+  },
+  "repeats_checked": 20,
+  "status": "pass",
+  "bytes_model": "unique tensor bytes",
+  "flops_model": "dense arithmetic estimate; transcendental operations excluded"
+}
