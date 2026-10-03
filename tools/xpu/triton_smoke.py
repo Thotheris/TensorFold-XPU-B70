@@ -253,9 +253,12 @@ def run_probes(out_dir: Path) -> dict:
             cases.append({"rows": rows, "control_ok": control_ok, "hazard_ok": mismatches == 0,
                           "hazard_mismatch_launches": mismatches, "repeats": 20,
                           "control_kernel": triton_kernel_stats(safe), "hazard_kernel": triton_kernel_stats(kernel)})
-        return {"ok": bool(controls_ok), "hazard_observed": any(not case["hazard_ok"] for case in cases),
+        llir = kernel.asm.get("llir", "") if kernel is not None else ""
+        fence = "@_Z7barrierj(i32 3)" in llir      # OpenCL barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
+        return {"ok": bool(controls_ok and fence), "hazard_observed": any(not case["hazard_ok"] for case in cases),
+                "lowering": "work-group barrier with local and global fences" if fence else "unexpected barrier lowering",
                 "scope": "disjoint channel blocks; in-place same-workgroup read/write; no cross-workgroup fence",
-                "production_requirement": "use separate destination; observations do not establish fence semantics",
+                "production_requirement": "orders global memory within a work-group only, never across work-groups",
                 "cases": cases}
 
     def block_m():

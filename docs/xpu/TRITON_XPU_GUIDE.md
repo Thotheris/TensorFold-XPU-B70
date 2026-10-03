@@ -93,7 +93,7 @@ Defaults: `num_warps=4`, `num_ctas=1` (**must stay 1** [S28]), `num_stages=2`, `
 | uint64 / int64 | works in practice | verify the uint64 hash against numpy |
 | `tl.histogram` | works via SLM atomics (slow for small inputs) | [S26]; GLM-only in TensorFold |
 | `tl.cumsum` | works via a shuffle chain | [S27] |
-| `tl.debug_barrier` as a global-memory fence | **`[UNVERIFIED]`** | don't rely on it; double-buffer instead |
+| `tl.debug_barrier` as a global-memory fence | verified 2026-10-03: lowers to OpenCL `barrier(CLK_LOCAL_MEM_FENCE \| CLK_GLOBAL_MEM_FENCE)` | orders global memory **within a work-group only**; never across work-groups (the `triton-smoke` barrier probe checks the lowering) |
 | `tl.static_range` | works, but large unrolls can abort IGC | [S23]; use runtime `range` above about 64 |
 | `while` loops (`scf.while`) | open RemoveLayoutConversions bug (#8189) | rewrite as a bounded `for` with predicates |
 | `tl.reshape/trans/join/split` | works; some layout bugs fixed | 3D reshape + reduce causes heavy SLM conversions |
@@ -389,7 +389,6 @@ Reuse the existing tests, after the device fixture from WS2 lands:
 - Native 64-bit integer arithmetic on Xe2.
 - Level Zero indirect access set by Triton's launcher.
 - Device addresses ≥ 2^63 on B70.
-- `tl.debug_barrier` fence semantics.
 - fp8e4nv overflow behaviour.
 - `tl.sigmoid` accuracy in 3.8.
 - Triton version for torch 2.12 (3.7.1 inferred).
