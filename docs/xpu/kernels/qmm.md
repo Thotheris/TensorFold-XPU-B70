@@ -117,38 +117,47 @@ must be inspected before assigning that floor to GPU launch latency. The A shape
 1302 us, gate/up 775 us, qkv 764 us) are genuinely slow: 6-10% of peak, spilling 5-9 KB at 256 GRF. M=1 and M=16
 cost the same because the dot pads M to BM = 32. T1 (`num_warps`, `grf_mode`, BN, split-K per shape) is the next step.
 
-### T1 configuration (sweeps on the B70, dev runs; the bundle numbers replace these when the run lands)
+### T1 (qualified on `44a106d`, bundle `runs/xpu--main/44a106d-20261003T071529Z`, toolchain hash 858a0a59)
 
-Method: `kbench`-style back-to-back launches, weights cycled over copies larger than the 24 MB LLC, every config checked
-bit-equal on fp32 outputs against the T0 config at the same slices. Small single-warp programs (1 warp of 16 lanes,
-BM = BN = 16 or 32) remove the spills; the chained sub-dots cut the live `q` tile.
+`kernels:qmm` 45 passed; `unit-xpu` 51 passed (both include the recipe-shape and head invariance sweeps); every case
+`bitwise_ok`, 20 repeats, row alone == window on fp32 sums; 16 lanes, DPAS in every TTGIR, 0 spill bytes everywhere
+(T0: 5120-9472). `n_regs`: 256 from the driver (automatic large-GRF build) for down and Nemotron in_proj, else 128
+from `grf_mode` (a budget, not measured usage).
 
-| Weight | T1 config | M=1 % of 608 GB/s (T0) |
-|---|---|---|
-| A down 5120 x 17408 g128 | bm16 bn32 1 warp ksplit 4, 4 slices | 62.5 (5.8) |
-| A gate/up 17408 x 5120 g128 | bm16 bn16 1 warp ksplit 4, 4 slices (T0: 1) | 53.7 (9.8) |
-| A qkv 10240 x 5120 g128 | bm16 bn16 1 warp ksplit 8, 2 slices | 36.8 (5.8) |
-| B in_proj 10304 x 2688 g64 | bm16 bn32 1 warp ksplit 2, 2 slices | 19.5 (19.4), launch-bound |
-| B out_proj 2688 x 4096 g64 | bm16 bn32 1 warp ksplit 4, 4 slices | 7.9 (7.7), launch-bound |
-| bf16 heads (default for bf16) | bm16 bn32 2 warps 2 stages | 82-84 at M=1 and M=16 (57-59) |
+Columns: `call` = per-call mean of 20 calls queued back to back, weights cold (cycled over copies larger than the
+LLC); `device` = the same 20 calls queued behind a long matmul, so it has no host gaps; `host` = host submit time per
+call. % is of 608 GB/s on the bytes model (weights + scales + x + out).
 
-The bf16 optimum at M=1 alone (4 warps, 86-90%) fell to 37% at M=16, so the bf16 default is scored on M=1 + M=16.
+| Weight (N x K) | T1 config | M | call us | device us | device % | call % | host us | launches |
+|---|---|---|---|---|---|---|---|---|
+| A down 5120 x 17408 g128 | bm16 bn32 1w ks4, 4 slices | 1 / 16 | 120.4 / 139.9 | 115.0 / 136.8 | 65.8 / 56.1 | 62.9 / 54.9 | 127 / 117 | 2 |
+| A gate/up 17408 x 5120 g128 | bm16 bn16 1w ks4, 4 slices | 1 / 16 | 137.7 / 212.2 | 135.7 / 205.0 | 55.8 / 37.5 | 54.9 / 36.2 | 117 / 116 | 2 |
+| A qkv 10240 x 5120 g128 | bm16 bn16 1w ks8, 2 slices | 1 / 16 | 120.9 / 120.4 | 82.5 / 115.3 | 53.9 / 39.3 | 36.8 / 37.6 | 114 / 116 | 2 |
+| A head 248320 x 5120 bf16 | bm16 bn32 2w ns2 | 1 / 16 | 4959 / 5115 | 4977 / 5112 | 84.0 / 82.1 | 84.3 / 82.0 | 77 / 76 | 1 |
+| A in_proj_a/b 48 x 5120 bf16 | bf16 default, 8 slices | 1 / 16 | 122.2 / 129.5 | 45.1 / 47.4 | 1.8 / 2.3 | 0.7 / 0.8 | 116 / 125 | 2 |
+| B in_proj 10304 x 2688 g64 | bm16 bn32 1w ks2, 2 slices | 1 / 16 | 130.9 / 131.0 | 50.2 / 57.3 | 48.3 / 43.4 | 18.5 / 19.0 | 126 / 116 | 2 |
+| B out_proj 2688 x 4096 g64 | bm16 bn32 1w ks4, 4 slices | 1 / 16 | 122.9 / 123.8 | 58.6 / 104.5 | 16.5 / 9.5 | 7.8 / 8.1 | 118 / 119 | 2 |
+| B head 131072 x 2688 bf16 | bm16 bn32 2w ns2 | 1 / 16 | 1351 / 1386 | 1364 / 1391 | 85.0 / 83.9 | 85.8 / 84.1 | 77 / 79 | 1 |
+
+All six windows (M = 1, 2, 4, 8, 12, 16) are in the bundle's `kernels/qmm-*.json`; time per verified row at M=16 is
+the call time / 16 (e.g. A down 8.7 us, A head 320 us).
+
+**The ~120 us floor is host submission, not the GPU** (same bundle, `host_breakdown` for B out_proj at M=1): the
+`sym_matmul` wrapper takes 98.5 us of host time, of which Triton's JIT dispatch of the main kernel is 32.3 us (the
+driver launch inside it, `CompiledKernel.run`, is 11.4 us), the split-K reduce is a second such launch, `group_sums`
+alone is 41.9 us, and an allocation 2.1 us. Every split-K call is two launches, so calls whose device time is under
+~115 us run at the host's pace (Nemotron in_proj/out_proj, in_proj_a/b, A qkv at small M). `triton-smoke`'s
+`launch_latency` on the same bundle: a trivial Triton add submits in 38.5 us vs 18.1 us for `torch.add`.
+Removing launches (no separate reduce, shared group sums, cached launches or graphs) is WS6 work, not done here.
 
 ## Open issues
 
-- Resolved on da2a34f: the BM sweep (16..128) is bitwise row-invariant on this shape, and xs from `_group_sums`,
-  `_add_rmsnorm` and `_swiglu` is equal.
-- 4-bit decode is far from the roofline (above); the A shapes spill 5-9 KB. Run one bounded, shape-only T1
-  pass after current-head qualification, then return to missing correctness kernels. Test M=1/2/4/8/12/16
-  and retain the full invariance sweep; do not runtime-dispatch FMA vs DPAS by M.
-- `55d2095` adds recipe-shape coverage and `f569957` adds timing probes. Neither has a bundle in the index
-  inspected for this documentation revision; the `da2a34f` pass does not qualify those descendant changes.
-- The `da2a34f` summary's glue/prompt-attention "Bitwise break" entries are absent artifacts from omitted
-  suites. They are missing coverage, not measured mismatches; combined current-head qualification is pending.
-- A ~120 us per-launch floor would dominate decode (several launches per layer); source pending `launch_latency`.
-- `qmm_fast.rows` and `matmul_rows` assume tiled CUDA weights; add stored-SYM/BF16 row-selection adapters
-  before WS5, with contiguous/disjoint/boundary-span equality against full-head slices. Retain the parent
-  arithmetic plan when row selection changes output width. Reject unsupported single-GPU `matmul_partial`
-  explicitly; do not enter a CUDA extension.
+- T1 pass done (bounded: one sweep per weight; stop here). Device bandwidth: A down 56-66%, gate/up 37-56%,
+  qkv 39-54%, bf16 heads 82-86%; the 80% N1 goal stays with K4.N.
+- Host submission (two Triton launches, about 115 us) bounds every split-K call; see the floor note above.
+- gate/up loses bandwidth as M grows (56% at M=1, 37% at M=16): BM=16 tiles re-read x per column tile. Not tuned
+  further (bounded pass).
+- `qmm_fast.rows` and `matmul_rows` assume tiled CUDA weights; add stored-SYM/BF16 row-selection adapters before WS5
+  (STEP 4), with contiguous/disjoint/boundary-span equality against full-head slices. Reject `matmul_partial` on XPU.
 - The SYM contract computes `P*s - 8*s*xs`, which cancels when `q` sits near 8; the fp64 tolerance (2^-7 of the max)
-  passes, but the A/B against `dot(x, q - 8) * s` noted above is still open.
+  passes, but the A/B against `dot(x, q - 8) * s` is still open.
