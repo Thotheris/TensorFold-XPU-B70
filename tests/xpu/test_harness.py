@@ -130,6 +130,42 @@ def test_compare_failures_bits_and_three_percent(tmp_path: Path):
     assert exact["bitwise_breaks"] == []
 
 
+def _bundle(root: Path, suites: dict, files: dict) -> Path:
+    (root / "kernels").mkdir(parents=True)
+    (root / "summary.json").write_text(json.dumps({"suites": suites, "pytest_failures": []}), encoding="utf-8")
+    for name, bitwise in files.items():
+        (root / "kernels" / name).write_text(json.dumps({"gbps": 10.0, "median_us": 5.0, "bitwise_ok": bitwise}),
+                                             encoding="utf-8")
+    return root
+
+
+def test_compare_separates_absent_artifacts_from_bitwise_failures(tmp_path: Path):
+    from tools.xpu.compare import render_diff
+
+    base = _bundle(tmp_path / "base", {"kernels:glue": "pass", "kernels:qmm": "pass"},
+                   {"glue.json": True, "kernels--glue.json": True, "qmm.json": True, "qmm-qwen-down-m1.json": True})
+    cur = _bundle(tmp_path / "cur", {"kernels:qmm": "pass"}, {"qmm.json": True})
+    report = compare_bundles(cur, base)
+    assert report["bitwise_breaks"] == []
+    assert [i["file"] for i in report["not_covered"]] == ["kernels/glue.json", "kernels/kernels--glue.json"]
+    assert {i["suite"] for i in report["not_covered"]} == {"kernels:glue"}
+    assert report["missing_artifacts"] == [{"file": "kernels/qmm-qwen-down-m1.json", "suite": "kernels:qmm"}]
+    assert not report["ok"]                                    # a suite that ran lost a case: that still blocks
+    text = render_diff(report)
+    assert "Missing artifact" in text and "Not covered by this run" in text and "Bitwise break" not in text
+
+    (cur / "kernels" / "qmm-qwen-down-m1.json").write_text(json.dumps({"bitwise_ok": False}), encoding="utf-8")
+    broken = compare_bundles(cur, base)
+    assert broken["bitwise_breaks"] == [{"file": "kernels/qmm-qwen-down-m1.json", "baseline": True, "current": False}]
+    assert broken["missing_artifacts"] == [] and not broken["ok"]
+
+    (cur / "kernels" / "qmm-qwen-down-m1.json").write_text(json.dumps({"gbps": 10.0, "median_us": 5.0,
+                                                                       "bitwise_ok": True}), encoding="utf-8")
+    matching = compare_bundles(cur, base)
+    assert matching["ok"] and matching["bitwise_breaks"] == [] and matching["missing_artifacts"] == []
+    assert render_diff(matching).startswith("No regressions.") and "kernels--glue.json" in render_diff(matching)
+
+
 def test_schema_accepts_env_kernel_and_e2e_and_rejects_mixtures():
     env = merge_env(versions={}, probes={}, models={"repo": "a" * 40}, fingerprint_hash="abc")
     assert validate_document(env) == []

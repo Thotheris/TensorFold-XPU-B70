@@ -36,29 +36,55 @@ def _failures(bundle: Path) -> set[str]:
     return failures
 
 
+def _suites(bundle: Path) -> set[str]:
+    doc = _read(bundle / ("summary.json" if (bundle / "summary.json").exists() else "status.json"))
+    suites = doc.get("suites", {})
+    return set(suites) if isinstance(suites, dict) else set()
+
+
+def _owner(stem: str, suites: set[str]) -> str | None:
+    """The suite whose artifact a kernels/e2e file is: ``<name>``, ``<name>-<case>`` or ``kernels--<name>``."""
+    for suite in sorted(suites):
+        if ":" not in suite:
+            continue
+        name = suite.split(":", 1)[1]
+        if stem in (name, suite.replace(":", "--")) or stem.startswith(name + "-"):
+            return suite
+    return None
+
+
 def _number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def compare_bundles(current: Path, baseline: Path, *, threshold: float = PERF_THRESHOLD) -> dict:
-    """Only newly broken checks and slower comparable measurements are regressions."""
+    """Newly broken checks, slower comparable measurements and absent artifacts of suites that ran are regressions.
+
+    A baseline artifact absent because this run did not request its suite is reported as not covered, not as a break.
+    """
     if not math.isfinite(threshold) or not 0 <= threshold < 1:
         raise ValueError("threshold must be finite and in [0, 1)")
     report = {
         "new_failures": sorted(_failures(current) - _failures(baseline)),
         "bitwise_breaks": [],
         "perf_regressions": [],
+        "missing_artifacts": [],
+        "not_covered": [],
         "ok": True,
     }
+    requested = _suites(current)
+    known = requested | _suites(baseline)
     for category in ("kernels", "e2e"):
         for old_path in sorted((baseline / category).glob("*.json")):
             relative = old_path.relative_to(baseline)
             new_path = current / relative
             old, new = _read(old_path), _read(new_path)
-            if (
-                category == "kernels" and old.get("bitwise_ok") is True
-                and (not new_path.exists() or new.get("bitwise_ok") is False)
-            ):
+            if not new_path.exists():
+                owner = _owner(old_path.stem, known)
+                key = "missing_artifacts" if owner in requested else "not_covered"
+                report[key].append({"file": relative.as_posix(), "suite": owner})
+                continue
+            if category == "kernels" and old.get("bitwise_ok") is True and new.get("bitwise_ok") is False:
                 report["bitwise_breaks"].append(
                     {"file": relative.as_posix(), "baseline": True, "current": new.get("bitwise_ok")}
                 )
@@ -75,21 +101,27 @@ def compare_bundles(current: Path, baseline: Path, *, threshold: float = PERF_TH
                     report["perf_regressions"].append(
                         {"file": relative.as_posix(), "metric": metric, "baseline": before, "current": after}
                     )
-    report["ok"] = not any(report[key] for key in ("new_failures", "bitwise_breaks", "perf_regressions"))
+    report["ok"] = not any(report[key] for key in ("new_failures", "bitwise_breaks", "perf_regressions",
+                                                   "missing_artifacts"))
     return report
 
 
 def render_diff(report: dict) -> str:
-    """The regression summary is short Markdown."""
-    if not any(report.get(key) for key in ("new_failures", "bitwise_breaks", "perf_regressions")):
-        return "No regressions."
-    lines = ["## Baseline regressions"]
+    """The regression summary is short Markdown; coverage this run did not request is listed apart from regressions."""
+    keys = ("new_failures", "bitwise_breaks", "perf_regressions", "missing_artifacts")
+    lines = ["## Baseline regressions"] if any(report.get(key) for key in keys) else ["No regressions."]
     lines.extend(f"- New failure: `{name}`" for name in report.get("new_failures", []))
     lines.extend(f"- Bitwise break: `{item['file']}`" for item in report.get("bitwise_breaks", []))
     lines.extend(
         f"- Performance: `{item['file']}` {item['metric']} {item['baseline']:g} -> {item['current']:g}"
         for item in report.get("perf_regressions", [])
     )
+    lines.extend(f"- Missing artifact (suite `{item['suite']}` ran): `{item['file']}`"
+                 for item in report.get("missing_artifacts", []))
+    if report.get("not_covered"):
+        lines += ["", "## Not covered by this run (suite not requested; not a measurement)"]
+        lines.extend(f"- `{item['file']}`" + (f" (`{item['suite']}`)" if item["suite"] else "")
+                     for item in report["not_covered"])
     return "\n".join(lines)
 
 
