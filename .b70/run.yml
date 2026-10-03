@@ -1,4 +1,4 @@
-suites: [env, triton-smoke, unit-host, unit-xpu, kernels:prefill-attention, kernels:qmm, kernels:gdn, kernels:experts, kernels:mamba]
+suites: [env, triton-smoke, unit-host, unit-xpu]
 baseline: xpu/main
-timeout_min: 180
-suite_timeouts_min: {triton-smoke: 10, unit-xpu: 75, kernels:prefill-attention: 20, kernels:qmm: 60, kernels:gdn: 30, kernels:experts: 20, kernels:mamba: 20}
+timeout_min: 120
+suite_timeouts_min: {triton-smoke: 10, unit-xpu: 75}

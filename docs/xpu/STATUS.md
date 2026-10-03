@@ -26,6 +26,7 @@ from the clean clone `~/.local/share/tensorfold-xpu/repo`, with `<dir>` from `to
 | `b4120ac` | `runs/xpu--main/b4120ac-20261003T085557Z` | env, triton-smoke, unit-host, unit-xpu | pass; tree attention, DFlash2 block attention / append on XPU; unit-xpu 114 |
 | `40c074b` | `runs/xpu--main/40c074b-20261003T095047Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; prompt attention routing, `_attn_prep` host cos/sin, DFlash2 kernels, head-row views (`4dcf58b`); unit-xpu 126, qmm 52 |
 | `3a28fb4` | `runs/xpu--main/3a28fb4-20261003T101551Z` | env, triton-smoke, unit-host, unit-xpu, kernels:prompt, kernels:experts, kernels:mamba | pass; K5 (`9240c88`), K3 (`529277e`), K2 (`4733cb5`); unit-xpu 153 |
+| `c155552` | `runs/xpu--main/c155552-20261003T170920Z` | env, triton-smoke, unit-host, unit-xpu, kernels:prefill-attention, kernels:qmm, kernels:gdn, kernels:experts, kernels:mamba | pass; fix pass (`414da45` descriptor attention, `5f3bb56` barrier probe, `c155552` direct launches, 4-row GDN / scan); unit-xpu 169 |
 | `56756cf` | `runs/xpu--main/56756cf-20261003T103858Z` | env, triton-smoke, unit-host, unit-xpu | pass; Nemotron router (DPAS), `_conv`/`_scan`, conv commit (double-buffered), attention merge, keyed sampler (100,000 draws equal `exact_sampling`); unit-xpu 164 |
 
 unit-host is `pytest tests --host-only` in the runtime image (1485 passed, 30 skipped on the latest heads): it excludes
@@ -40,31 +41,43 @@ checks, new modules, CUDA launches untouched) but were not executed on CUDA hard
 | K4 SYM decode | Qwen gate/up 17408 x 5120, M=1 / 16 | 136 / 205 us | 56 / 38% | 0 | 16 / yes |
 | K4 bf16 GEMV | Qwen head 248320 x 5120, M=1 / 16 | 4977 / 5112 us | 84 / 82% | 0 | 16 / yes |
 | K4 bf16 GEMV | Nemotron head 131072 x 2688, M=1 / 16 | 1364 / 1391 us | 85 / 84% | 0 | 16 / yes |
-| K1 GDN | replay 48 layers x 4 rows | 604 us | 82% of 608 GB/s | 0 | 32 / – |
-| K1 GDN | 12-row tree, one layer | 125 us | 29% | 448 B | 32 / – |
-| K1 GDN | 512-row prompt chain | 1271 us | latency-bound | 0 | 32 / – |
+| K1 GDN | replay 48 layers x 4 rows (`c155552`) | 585 us | 85% of 608 GB/s | 0 | 32 / – |
+| K1 GDN | 12-row tree, one layer (`c155552`) | 112 us | 33% | 0 | 32 / – |
+| K1 GDN | 512-row prompt chain (`c155552`) | 950 us | latency-bound | 0 | 32 / – |
 | K5 prompt GEMM | Qwen gate/up, 1024 rows | 8963 us, 20.4 TFLOPS | 11% of 183 TFLOPS | 0 | 16 / yes |
 | K3 experts | decode up / down, 16 tokens x 8 slots | 510 / 552 us | 57 / 53% of 608 GB/s | 0 | 16 / yes |
 | K3 experts | prompt up / down, 1024 tokens | 5325 / 6202 us | 8.4 / 7.2% of 183 TFLOPS | 0 | 16 / yes |
-| K2 Mamba scan | 1024-row chunk, one layer | 4128 us | latency-bound | 0 | 32 / – |
-| K6 prompt attention | 129 rows, D=256 (kernels:prefill-attention) | 595 us | 0.4 TFLOPS | 71,680 B | 16 / yes |
+| K2 Mamba scan | 1024-row chunk, one layer (`c155552`) | 3507 us | latency-bound | 0 | 32 / – |
+| K6 prompt attention | 129 rows, D=256, descriptor kernel (`c155552`) | 556 us | 0.5 TFLOPS | 62,016 B | 16 / yes |
 
-**Host submission bounds small calls.** One Triton launch costs about 32 us of host time (11 us of it the driver
-launch); a split-K qmm call is about 115 us; `group_sums` alone is 42 us (`44a106d` `host_breakdown`). Calls whose
-device time is below that run at the host's pace (1- and 4-row GDN trees at 121 us, Nemotron in/out_proj, in_proj_a/b).
+**Host submission bounds small calls.** With direct launches (`c155552` `host_breakdown`) the split-K `sym_matmul`
+wrapper takes 68.6 us of host time (98.5 us before); a Triton JIT launch is 31.6 us and a direct one 11.3 us;
+`group_sums` alone is 41.8 us. Calls under ~90 us of device time still run at the host's pace (1- and 4-row GDN trees
+at 101 us, Nemotron in/out_proj and in_proj_a/b at ~90 us).
 
-## Open issues and minimal repros
+## Open issues (after the 2026-10-03 fix pass, `414da45`..`c155552`, numbers from its bundle unless marked dev)
 
-- **Launch overhead** (above): the largest decode cost for small ops. Fixes are WS6 (fewer launches: fused reduce and
-  group sums, cached launches, graphs after a graphs == eager test).
-- **K6 D=256 spills ~71 KB** at every tile/warp/GRF choice (sweep in `40c074b`'s history, all bit-equal): structural
-  (q, o and K/V tiles live together). Chaining the QK dot over D halves (as K4's `ksplit`) is the T1 candidate.
-- **GDN tree spills 448-512 B** (R=8, 1 warp); R and warps change no bits, so T1 can retune freely.
-- **K2 and K1 prompt chains are latency-bound** (2.5-4 us a step). A chunked form changes the contract; new card first.
-- `tl.debug_barrier` as a global-memory fence on XPU stays `[UNVERIFIED]`; the one user (`_conv_commit`) is
-  double-buffered on XPU instead.
-- No DEVICE_LOST on any recurrence kernel so far (GDN tree/replay/chain, Mamba `_conv`/`_scan`, K2 scan).
-- The SYM decode contract cancels (`P*s - 8*s*xs`) when q sits near 8; the `dot(x, q - 8) * s` A/B is open.
+- **Launch overhead, part fixed.** `xpu/kernels/launch.py` calls compiled kernels directly after the first JIT
+  dispatch (qmm, bf16 GEMV, reduce, GDN, experts): a split-K qmm call's host time 98.5 -> 68.6 us. What remains is
+  the Intel driver's launch (~16 us each), allocations and wrapper checks; fewer launches (a fused split-K reduce,
+  shared group sums, graphs after a graphs == eager test) is WS6.
+- **K6 spills: structural in Triton XPU.** Every variant tried keeps 28-80 KB of spills (pointer loads, pre-transposed
+  K, D split in halves, tensor descriptors; all bit-equal). The descriptor kernel is now the XPU route for D=128/256
+  (dev: 11.5 vs 6.4 TFLOPS at D=128, 6.2 vs 5.8 at D=256). Removing the spills needs a native (N1) kernel.
+- **GDN tree spills: fixed.** 4 rows a program, 1 warp: no spills; the prompt chain 1271 -> 950 us.
+- **K1 / K2 prompt chains stay latency-bound** (sequential steps). 4 rows a program helped (scan 4128 -> 3507 us);
+  `num_stages` did not. A chunked (WY / SSD) form changes the contract and needs its own card and tests.
+- **`tl.debug_barrier`: verified.** It lowers to OpenCL `barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)`: a
+  work-group barrier with a global fence, never cross-work-group; `triton-smoke` now checks the lowering.
+- **SYM cancellation: closed.** Dev A/B: worst fp32 relative error 3.2e-6 (clustered nibbles, non-zero activation mean)
+  against 2.3e-7 for `dot(x, q - 8) * s`, both ~1000x below bf16 output rounding; the contract stays.
+- No DEVICE_LOST on any recurrence kernel so far.
+- **Kernel code review** (`72edaec..c155552`, nine findings, all fixed in `f3b06d7` / `aa00945`): DFlash2 now takes
+  SYM / bf16 head row views on XPU; Nemotron `_chunk`, `_conv`, `_conv_rows`, `_scan` launch with fusion off on XPU;
+  `sample_candidates` uses runtime loops on XPU; strided rows in the XPU `matmul_rows`; `lane_matmul` derives the SYM
+  group; no wasted `xs` in the Nemotron merge; one conv-commit kernel; `attn_prep` takes precomputed rope tables;
+  `xpu/build.load` refuses a library built from other sources. Remaining WS5 item: engines should build the rope
+  tables once per forward and pass them to `attn_prep`.
 
 ## WS3b / WS5 prerequisites (not done here)
 
