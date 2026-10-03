@@ -58,6 +58,7 @@ def test_glm_nonfit_refuses_before_weight_load(tmp_path, monkeypatch):
     checkpoint(tmp_path, config, [("model.language_model.layers.0.mlp.experts.0.gate_proj.weight",
                                   "U32", [65536, 32768], 8 * 1024**3)])
     monkeypatch.setattr(torch.cuda, "set_device", lambda *a: None)
+    monkeypatch.setattr(capacity.accel, "api", lambda **kw: torch.cuda)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a: (6 * 1024**3, 8 * 1024**3))
     monkeypatch.setattr(capacity, "_meminfo", lambda: None)      # a Spark's MemAvailable would admit it
     monkeypatch.setattr(weights.Config, "read", lambda *a: glm)

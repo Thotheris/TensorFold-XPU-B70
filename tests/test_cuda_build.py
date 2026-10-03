@@ -217,11 +217,22 @@ def test_without_torchs_directory_lookup_the_build_goes_ahead_quietly(ext, monke
 def test_the_lock_named_is_the_one_torch_waits_on(tmp_path, monkeypatch):
     """Real torch, nothing compiled: ``load`` waits on the lock the line names until it is deleted."""
 
+    from torch.utils import cpp_extension
+
     _gpu(monkeypatch, (12, 1))
     monkeypatch.setenv("TORCH_EXTENSIONS_DIR", str(tmp_path / "extensions"))
     lock = tmp_path / "extensions" / "tf_lock_probe" / "lock"      # TORCH_EXTENSIONS_DIR/<name>/lock
     lock.parent.mkdir(parents=True)
-    lock.write_text("")
+    held = cpp_extension.FileLock(str(lock)) if hasattr(cpp_extension, "FileLock") else None
+    if held is not None:
+        held.acquire()
+    else:
+        lock.write_text("")
+
+    def no_compile(**kwargs):
+        raise RuntimeError("lock probe does not compile")
+
+    monkeypatch.setattr(cpp_extension, "_write_ninja_file_and_build_library", no_compile)
     source = tmp_path / "tf_lock_probe.cpp"
     source.write_text("int tf_lock_probe() { return 0; }\n")
     said, ended = [], []
@@ -235,9 +246,14 @@ def test_the_lock_named_is_the_one_torch_waits_on(tmp_path, monkeypatch):
 
     thread = threading.Thread(target=start, daemon=True)
     thread.start()
-    thread.join(0.5)
-    assert thread.is_alive() and not ended           # torch is waiting on that file
-    assert len(said) == 1 and str(lock) in said[0]
-    lock.unlink()
+    try:
+        thread.join(0.5)
+        assert thread.is_alive() and not ended           # torch is waiting on that file
+        assert len(said) == 1 and str(lock) in said[0]
+    finally:
+        if held is not None:
+            held.release()
+        else:
+            lock.unlink()
     thread.join(10)
     assert not thread.is_alive() and len(ended) == 1

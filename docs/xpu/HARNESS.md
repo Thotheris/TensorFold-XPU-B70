@@ -306,8 +306,8 @@ succeeded. A later 2 GiB step, then another 2 GiB, moved `MemAvailable` by about
 
 ## Container runtime rollout
 
-The container path is implemented. Building and running it on the B70 is **[UNVERIFIED]** until an exact-SHA
-container bundle lands. Docker Engine (`docker.io` on Ubuntu 26.04), permission to use its daemon (the `docker`
+The image built on the B70 and the container `env` suite passed at `c6f94fb`; the host suite still needs a green
+bundle. Results logs normalize trailing whitespace so pytest tracebacks can be committed without weakening Git checks. Docker Engine (`docker.io` on Ubuntu 26.04), permission to use its daemon (the `docker`
 group or rootless Docker), `/dev/dri` render access, kernel >= 6.17 with `xe`, firmware, ReBAR, host `xpu-smi`,
 and offline model snapshots are host prerequisites. DLE 2026.1 remains on the host for native builds only.
 Docker installation and group membership are operator steps.
@@ -350,7 +350,8 @@ records Python and the image ID at the top level and under `versions`; the ID pa
 `container_probes` records fresh gcc launchers, a gcc wrapper that removes Python include flags, and a Level Zero
 run with an empty OpenCL ICD directory. The requirement-removal variants provide evidence for a future image
 change; gcc with Python headers and native manifest compatibility gate env. Package compatibility with the host
-kernel is demonstrated by the fresh gcc Triton add and DPAS flags. These probes remain **[UNVERIFIED]** on the B70.
+kernel is demonstrated by the fresh gcc Triton add and DPAS flags. These probes passed on the B70 at `c6f94fb`. The uninitialized 4/8/16 GiB allocation probe does not measure
+the RAM cost of populated model weights; the compiler-header variant does not establish that headers can be removed.
 
 For a single fallback invocation use `TF_XPU_MODE=venv python3 tools/xpu/b70_runner.py --once` (or `--mode venv`).
 The runner records consumption in `venv-fallback.json` beneath its state directory: even if the override stays in the

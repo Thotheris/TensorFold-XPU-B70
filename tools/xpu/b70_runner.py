@@ -125,6 +125,11 @@ def _redact(value: object, *, drop_keys: bool = False) -> object:
     return value
 
 
+def _log_text(value: str) -> str:
+    """Redacted logs have no trailing whitespace that can prevent results commits."""
+    return "\n".join(line.rstrip() for line in str(_redact(value)).splitlines()).rstrip() + "\n"
+
+
 def _has_secret(value: object) -> bool:
     if isinstance(value, dict):
         return any(secret_key(str(key)) or _has_secret(item) for key, item in value.items())
@@ -888,9 +893,9 @@ def main(argv: list[str] | None = None) -> int:
             if source.is_file():
                 assert_inside(out_dir, source)
                 (bundle / "logs" / filename).write_text(
-                    str(_redact(source.read_text(encoding="utf-8"))), encoding="utf-8",
+                    _log_text(source.read_text(encoding="utf-8")), encoding="utf-8",
                 )
-        (bundle / "logs" / "runner.log").write_text(str(_redact("\n".join(logs))).rstrip() + "\n", encoding="utf-8")
+        (bundle / "logs" / "runner.log").write_text(_log_text("\n".join(logs)), encoding="utf-8")
         append_index(
             results_dir / "index.jsonl",
             {"branch": head.branch, "sha": head.sha, "sha7": sha7(head.sha), "time": utc.isoformat(),
@@ -906,7 +911,7 @@ def main(argv: list[str] | None = None) -> int:
             error = str(_redact(committed.stderr or committed.stdout or "results commit failed"))
             print(error, file=sys.stderr)
             logs.append(error)
-            (bundle / "logs" / "runner.log").write_text("\n".join(logs).rstrip() + "\n", encoding="utf-8")
+            (bundle / "logs" / "runner.log").write_text(_log_text("\n".join(logs)), encoding="utf-8")
             identity = any(
                 marker in error.lower()
                 for marker in ("identity unknown", "unable to auto-detect email", "user.email", "tell me who you are")

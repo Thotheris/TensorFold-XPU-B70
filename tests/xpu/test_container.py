@@ -221,7 +221,7 @@ def test_runner_image_selects_container_without_host_install(mode, tmp_path, mon
     def suite(name, **kwargs):
         assert bool(kwargs.get("container")) == (mode == "container")
         seen["suites"].append(name)
-        return runner.SuiteResult(name, "pass", "", {}, "probe\n\n")
+        return runner.SuiteResult(name, "pass", "", {}, "probe  \n\t\n")
 
     monkeypatch.setattr(runner, "run_git", git)
     monkeypatch.setattr(runner, "run_cmd", command)
@@ -238,7 +238,7 @@ def test_runner_image_selects_container_without_host_install(mode, tmp_path, mon
     assert seen["suites"] == ["env", "unit-host"] and seen["push"]
     env_doc = json.loads(next(results.glob("runs/*/*/env.json")).read_text())
     assert env_doc["image"] == (IMAGE if mode == "container" else None)
-    assert not next(results.glob("runs/*/*/logs/runner.log")).read_text().endswith("\n\n")
+    assert next(results.glob("runs/*/*/logs/runner.log")).read_text() == "probe\n\n\nprobe\n"
 
 
 def test_host_only_keeps_mlx_sources_and_filters_test_dependencies(tmp_path):
@@ -281,3 +281,9 @@ def test_suite_python_uses_writable_venv_and_image_packages(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "prefix", str(runtime))
     assert container._suite_python(runtime) == Path(sys.executable)
     assert len(calls) == 1
+
+
+def test_result_logs_strip_traceback_whitespace():
+    from tools.xpu.b70_runner import _log_text
+
+    assert _log_text("traceback  \n  failure\t\n\n") == "traceback\n  failure\n"
