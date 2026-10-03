@@ -38,4 +38,14 @@ against an fp64 loop of the same recurrence.
 
 ## Measurements
 
-(none yet)
+T0 qualified on `3a28fb4`, bundle `runs/xpu--main/3a28fb4-20261003T101551Z` (toolchain hash 858a0a59). Per-launch means
+of 5 launches queued back to back; every case `bitwise_ok` (20 repeats plus the in-bench chunk / alone check); 0 spill
+bytes. % of 608 GB/s or 183 TFLOPS on the stated bytes / flops models. `kernels:mamba` 6 tests passed. 32 lanes, 1 warp,
+R = 8 rows a program.
+
+| Case | us | per step |
+|---|---|---|
+| 1024-row chunk, 64 heads x 64 x 128 | 4127.5 | about 4.0 us |
+
+Latency-bound (sequential steps, 512 programs). A chunked (SSD) form would change the arithmetic contract and needs
+its own card; 23 Mamba layers x 4.1 ms is about 95 ms a 1024-token chunk.

@@ -1,80 +1,91 @@
 # XPU port status
 
-This snapshot is based on inspected result bundles through `44a106d`, not on an end-to-end recipe run.
-Refresh it from `origin/results:index.jsonl` before starting kernel work. The
-[execution prompt](prompts/kernel-engineer.txt), [plan](PORT_PLAN.md) and
-[upstream atlas](reports/tensorfold-kernel-atlas-2026-10-02.html) describe the next work.
+Kernel hand-off snapshot, 2026-10-03. Every number below is read from a B70 bundle on `origin/results`; refresh from
+`origin/results:index.jsonl` before relying on it. No end-to-end recipe run exists yet. The
+[execution prompt](prompts/kernel-engineer.txt), [plan](PORT_PLAN.md), [kernel map](KERNEL_MAP.md) and
+[upstream atlas](reports/tensorfold-kernel-atlas-2026-10-02.html) describe the work; kernel cards are in
+[kernels/](kernels/).
+
+## How runs happen on this box
+
+The B70 is the development machine. No runner service is installed: after each push the operator's agent runs
+`python3 tools/xpu/b70_runner.py --once --image tensorfold-xpu:tc-349b7f516e06 --mode container --native-ext <dir>`
+from the clean clone `~/.local/share/tensorfold-xpu/repo`, with `<dir>` from `tools/xpu/build_ext_image.sh`
+(`TF_XPU_BUILD_IMAGE=tensorfold-xpu-build:dle-2026.1-81b58de60235`). Toolchain hash of every bundle below: 858a0a59.
 
 ## Verified evidence
 
 | Commit | Bundle | Executed suites | Qualification |
 |---|---|---|---|
-| `c32b417` | `runs/xpu--main/c32b417-20261003T050422Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention | pass; register reporting fix and selected migrated checks |
-| `da2a34f` | `runs/xpu--main/da2a34f-20261003T054251Z` | env, unit-host, unit-xpu, kernels:qmm | pass on executed suites; unit-xpu 37 passed, QMM 31 passed |
-| `02b52bc` | `runs/xpu--main/02b52bc-20261003T080109Z` | env, triton-smoke, unit-host, unit-xpu (native ext mounted) | pass; K0: AOT `intel_gpu_bmg_g31` hello extension, env native smoke exact (add, SG16 butterfly, bf16 DPAS), IGC dump holds `dpas`; unit-xpu 54. `15d4611` before it was red on env (probe imported tensorfold) |
-| `95b3549` | `runs/xpu--main/95b3549-20261003T082711Z` | env, triton-smoke, unit-host, unit-xpu, kernels:gdn | pass; K1.T0 GDN tree/replay/chain, unit-xpu 90, gdn 36, no DEVICE_LOST; replay 48x4 at 82% of 608 GB/s ([card](kernels/gdn.md)) |
-| `44a106d` | `runs/xpu--main/44a106d-20261003T071529Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; unit-host 1479 passed / 30 skipped, unit-xpu 51, glue 3, prefill-attention 3, QMM 45; qualifies `55d2095`, `f569957`, `d3008cb`, K4.T1 `f54f223`, compare fix `f1aefb4` |
+| `c32b417` | `runs/xpu--main/c32b417-20261003T050422Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention | pass; kbench GRF reporting |
+| `da2a34f` | `runs/xpu--main/da2a34f-20261003T054251Z` | env, unit-host, unit-xpu, kernels:qmm | pass; K4.T0 |
+| `44a106d` | `runs/xpu--main/44a106d-20261003T071529Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; K4.T1, compare fix, launch-floor breakdown; qualifies `55d2095`, `f569957`, `d3008cb` |
+| `15d4611` | `runs/xpu--main/15d4611-20261003T074218Z` | env, triton-smoke, unit-host, unit-xpu | **fail** on env only: the native smoke imported tensorfold before the branch install (fixed in `02b52bc`) |
+| `02b52bc` | `runs/xpu--main/02b52bc-20261003T080109Z` | env, triton-smoke, unit-host, unit-xpu (native ext) | pass; K0: AOT hello extension, env smoke exact, IGC `dpas`; unit-xpu 54 |
+| `95b3549` | `runs/xpu--main/95b3549-20261003T082711Z` | env, triton-smoke, unit-host, unit-xpu, kernels:gdn | pass; K1.T0; unit-xpu 90, gdn 36, no DEVICE_LOST |
+| `b4120ac` | `runs/xpu--main/b4120ac-20261003T085557Z` | env, triton-smoke, unit-host, unit-xpu | pass; tree attention, DFlash2 block attention / append on XPU; unit-xpu 114 |
+| `40c074b` | `runs/xpu--main/40c074b-20261003T095047Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; prompt attention routing, `_attn_prep` host cos/sin, DFlash2 kernels, head-row views (`4dcf58b`); unit-xpu 126, qmm 52 |
+| `3a28fb4` | `runs/xpu--main/3a28fb4-20261003T101551Z` | env, triton-smoke, unit-host, unit-xpu, kernels:prompt, kernels:experts, kernels:mamba | pass; K5 (`9240c88`), K3 (`529277e`), K2 (`4733cb5`); unit-xpu 153 |
+| `56756cf` | `runs/xpu--main/56756cf-20261003T103858Z` | env, triton-smoke, unit-host, unit-xpu | pass; Nemotron router (DPAS), `_conv`/`_scan`, conv commit (double-buffered), attention merge, keyed sampler (100,000 draws equal `exact_sampling`); unit-xpu 164 |
 
-K4.T0 supports symmetric INT4 g64/g128, fp16/bf16 scales and row-invariant BF16 GEMV. The inspected QMM
-results report bitwise checks passing, DPAS and 16 compiled lanes. Cross-producer canonical 64-wide sums
-passed. The [QMM card](kernels/qmm.md) records arithmetic and exact coverage.
+unit-host is `pytest tests --host-only` in the runtime image (1485 passed, 30 skipped on the latest heads): it excludes
+MLX modules and the GPU suite; it is not MLX or CUDA validation. CUDA paths are unchanged by construction (device
+checks, new modules, CUDA launches untouched) but were not executed on CUDA hardware here.
 
-K4.T1 (`44a106d`): per-shape single-warp tiles and chained sub-dots remove every spill. Device-only bandwidth at
-M=1 / M=16 (calls queued behind a long matmul, so no host gaps); details and all windows in the [QMM card](kernels/qmm.md).
+## Per-kernel measurements (bundle numbers; cards hold every case)
 
-| K4 case | Call us M=1 / 16 | Device us M=1 / 16 | Device % of 608 GB/s | T0 call % (da2a34f) | Spill bytes |
-|---|---:|---:|---:|---:|---:|
-| Qwen down, 5120 x 17408 SYM | 120 / 140 | 115 / 137 | 66 / 56 | 5.8 | 0 |
-| Qwen gate/up, 17408 x 5120 SYM | 138 / 212 | 136 / 205 | 56 / 38 | 9.8 | 0 |
-| Qwen qkv, 10240 x 5120 SYM | 121 / 120 | 83 / 115 | 54 / 39 | 5.8 | 0 |
-| Qwen head, 248320 x 5120 BF16 | 4959 / 5115 | 4977 / 5112 | 84 / 82 | 58.6 | 0 |
-| Nemotron head, 131072 x 2688 BF16 | 1351 / 1386 | 1364 / 1391 | 85 / 84 | 57.3 | 0 |
+| Kernel | Case | Result | % of peak | Spills | Lanes / DPAS |
+|---|---|---|---|---|---|
+| K4 SYM decode | Qwen down 5120 x 17408, M=1 (device-only) | 115 us | 66% of 608 GB/s | 0 | 16 / yes |
+| K4 SYM decode | Qwen gate/up 17408 x 5120, M=1 / 16 | 136 / 205 us | 56 / 38% | 0 | 16 / yes |
+| K4 bf16 GEMV | Qwen head 248320 x 5120, M=1 / 16 | 4977 / 5112 us | 84 / 82% | 0 | 16 / yes |
+| K4 bf16 GEMV | Nemotron head 131072 x 2688, M=1 / 16 | 1364 / 1391 us | 85 / 84% | 0 | 16 / yes |
+| K1 GDN | replay 48 layers x 4 rows | 604 us | 82% of 608 GB/s | 0 | 32 / – |
+| K1 GDN | 12-row tree, one layer | 125 us | 29% | 448 B | 32 / – |
+| K1 GDN | 512-row prompt chain | 1271 us | latency-bound | 0 | 32 / – |
+| K5 prompt GEMM | Qwen gate/up, 1024 rows | 8963 us, 20.4 TFLOPS | 11% of 183 TFLOPS | 0 | 16 / yes |
+| K3 experts | decode up / down, 16 tokens x 8 slots | 510 / 552 us | 57 / 53% of 608 GB/s | 0 | 16 / yes |
+| K3 experts | prompt up / down, 1024 tokens | 5325 / 6202 us | 8.4 / 7.2% of 183 TFLOPS | 0 | 16 / yes |
+| K2 Mamba scan | 1024-row chunk, one layer | 4128 us | latency-bound | 0 | 32 / – |
+| K6 prompt attention | 129 rows, D=256 (kernels:prefill-attention) | 595 us | 0.4 TFLOPS | 71,680 B | 16 / yes |
 
-The 117-125 us floor is host submission, measured on `44a106d` (`kernels/qmm.json` `host_breakdown`, M=1 B out_proj):
-the wrapper takes 98.5 us of host time; one Triton JIT launch is 32.3 us (11.4 us of it the driver launch), the
-split-K reduce is a second launch, `group_sums` alone is 41.9 us, an allocation 2.1 us. Calls under ~115 us of device
-time therefore run at the host's pace. `triton-smoke` `launch_latency`: Triton add 38.5 us host vs 18.1 us `torch.add`.
-Launch reduction is WS6 work. Effective GB/s uses the bytes model, not measured DRAM traffic.
+**Host submission bounds small calls.** One Triton launch costs about 32 us of host time (11 us of it the driver
+launch); a split-K qmm call is about 115 us; `group_sums` alone is 42 us (`44a106d` `host_breakdown`). Calls whose
+device time is below that run at the host's pace (1- and 4-row GDN trees at 121 us, Nemotron in/out_proj, in_proj_a/b).
 
-## Coverage limits and pending changes
+## Open issues and minimal repros
 
-- `compare.py` (`f1aefb4`) now lists a baseline artifact whose suite the run did not request as "not covered" and one
-  missing from a suite that ran as a blocking "missing artifact"; only `bitwise_ok: false` is a bitwise break.
-- `44a106d`'s compare flags 3-9% slower host-bound cases (Nemotron in_proj, in_proj_a/b): their device time is
-  45-57 us and host submission moved by a few us; they are host timing noise, not kernel changes.
-- The migrated host/device suites do not cover every recipe path. Neither recipe has an inspected e2e bundle;
-  serial/drafted token equality, checkpoint quality and model throughput remain unqualified.
-- The atlas is upstream source research: v0.6.3 `9356df5` compared with v0.6.0 `c464617`. It does not authorize
-  an upstream merge, new families or new checkpoint formats.
+- **Launch overhead** (above): the largest decode cost for small ops. Fixes are WS6 (fewer launches: fused reduce and
+  group sums, cached launches, graphs after a graphs == eager test).
+- **K6 D=256 spills ~71 KB** at every tile/warp/GRF choice (sweep in `40c074b`'s history, all bit-equal): structural
+  (q, o and K/V tiles live together). Chaining the QK dot over D halves (as K4's `ksplit`) is the T1 candidate.
+- **GDN tree spills 448-512 B** (R=8, 1 warp); R and warps change no bits, so T1 can retune freely.
+- **K2 and K1 prompt chains are latency-bound** (2.5-4 us a step). A chunked form changes the contract; new card first.
+- `tl.debug_barrier` as a global-memory fence on XPU stays `[UNVERIFIED]`; the one user (`_conv_commit`) is
+  double-buffered on XPU instead.
+- No DEVICE_LOST on any recurrence kernel so far (GDN tree/replay/chain, Mamba `_conv`/`_scan`, K2 scan).
+- The SYM decode contract cancels (`P*s - 8*s*xs`) when q sits near 8; the `dot(x, q - 8) * s` A/B is open.
 
-## Next work, in order
+## WS3b / WS5 prerequisites (not done here)
 
-1. Done on `44a106d`: current-head qualification, missing-versus-failed coverage, the launch-floor breakdown.
-2. Done on `44a106d`: the bounded K4.T1 pass (zero spills, windows 1-16, host/device split).
-3. Done on `02b52bc`: K0 isolated AOT/spir64 build and native loader/smoke; no compiler in the Triton runtime.
-4. T0 done on `95b3549`: K1 GDN tree/replay/chain T0; prepare N0 alternative if recurrence instability requires it.
-5. Recipe A portability, deterministic BF16/stored-INT4 head-row adapters and K5 prompt GEMM.
-6. K3 expert plan/pack/decode/prompt, then K2 prompt scan and Nemotron portability.
-7. Hand off exact-SHA kernel coverage and loader/adapter prerequisites. WS5/N1 require a separate request.
+- Loader: GPTQ / AutoRound SYM checkpoints to N-major `(N, K/8)` words + `(N, K/gs)` scales with `QLinear(sym=True)`;
+  experts stacked with `experts.pack_xpu`; Nemotron MTP from `model_extra_tensors.safetensors`.
+- DFlash2 on XPU: re-quantise the draft to SYM, and replace `dflash2._linear` (`F.linear`, not exact-path safe) with
+  the bf16 GEMV.
+- Engines: route projections to `qmm_fast.matmul` (decode) and `prompt_matmul` (prompt rows, never by chunk size);
+  GDN through `xpu.select.module("gdn")` with stacked states; experts through `xpu.kernels.experts` plans; samplers as
+  ported. `qmm_fast.matmul_partial` is refused on XPU.
 
-K2 prompt scan and K3 have no XPU implementation yet; K0 and K1.T0 are qualified (above).
-Head-row selection in `qmm_fast.rows`/`matmul_rows` still assumes CUDA tiled weights; ordinary XPU matmul
-support does not fix those paths. Preserve the parent arithmetic plan in selected-row tests.
+## Recommended native (N1) targets (provisional: microbenchmarks, no decode profile yet)
 
-Native priorities remain provisional until WS5 supplies a per-op decode profile. Future WS6 candidates are
-projection grouping, producer fusion, state residency and replay fused into verification, gated by their
-arithmetic/state tests. Measure draft/verify/commit cost and time per emitted token before claiming speedup.
+1. Launch count (WS6, not N1): every small decode op is host-bound at ~32 us a Triton launch.
+2. K4 SYM decode GEMV: 14 GB of weights a 27B token; T1 reaches 56-66% device bandwidth at M=1; target >= 80%.
+3. K3 grouped decode: 53-57% of 608 GB/s; Nemotron's largest per-token weight stream.
+4. K1 GDN tree step: 29% at a 12-row tree with spills; SG16 x 8 strided N0 mapping (gdn card) keeps the same bits.
+5. K6 D=256 prompt attention and K5 prompt GEMM (11% of DPAS peak) for prefill throughput.
 
 ## Recovery rule
 
 On DEVICE_LOST or a runner STOP flag, stop GPU submissions and record the failing SHA, logs and minimal repro.
 Independent host work can continue. The operator must restore device health before new GPU experiments;
 never clear STOP automatically or continue GPU work on another kernel while the device is wedged.
-
-## Documentation validation
-
-This documentation revision changes no executable source or runner configuration. Local checks in an isolated
-Python 3.11 environment: `pytest tests --host-only -q` passed (1074 passed, 349 skipped); the full `pytest tests -q`
-could not collect two MLX-dependent modules because MLX is unavailable. Ruff 0.16.10 reported 1117 findings,
-identical to the untouched source commit, with zero new findings. Documentation links, staged whitespace and
-atlas Chromium interactions/desktop/mobile layout passed. These checks are not a new B70 qualification.

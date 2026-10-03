@@ -34,6 +34,28 @@ Kinds:
 
 ---
 
+## 0. XPU status (kernel hand-off, 2026-10-03)
+
+Each row is qualified by a green B70 bundle on `origin/results` (read it before relying on a number). "T0": correct
+Triton; "T1": tuned Triton; "N0": native, correct. Kernel cards in `docs/xpu/kernels/` hold contracts and numbers.
+
+| Port | Op | XPU implementation | Status | Bundle |
+|---|---|---|---|---|
+| K0 | native build / loader | DLE build image + `xpu/build.py` (AOT `intel_gpu_bmg_g31`, JIT fallback), hello smoke in env | done | `02b52bc` |
+| K1 | GDN tree / replay / prompt chain | `xpu/kernels/gdn` (one step, pinned halving sum) | T0 | `95b3549` |
+| K2 | Mamba-2 prompt scan | `xpu/kernels/mamba` (via `mamba.scan_rows` on XPU) | T0 | `3a28fb4` |
+| K3 | grouped MoE experts (plan, pack, decode, prompt) | `xpu/kernels/experts` | T0 | `3a28fb4` |
+| K4 | 4-bit decode matmul (SYM g64/g128) + bf16 GEMV + head-row views | `xpu/kernels/qmm` | T1 | `44a106d`, `40c074b` |
+| K5 | 4-bit prompt GEMM | `xpu/kernels/qmm/prompt.py` | T0 | `3a28fb4` |
+| K6 | prompt attention | `prefill_attention.triton_attention` for every head dim on XPU (D=256 spills ~71 KB) | T0 | `40c074b` |
+| WS3 | tree attention (`_paths` bounded), DFlash2 block attention / append (signed pointer tables) | device checks in place | T0 | `b4120ac` |
+| WS3 | Qwen glue (`_attn_prep` host cos/sin), DFlash2 conv / prep | device checks in place | T0 | `40c074b` |
+| WS3 | Nemotron router, top-k, `_conv`/`_scan`, conv commit (double-buffered), attention merge, keyed sampler | device checks in place | T0 | `56756cf` |
+| – | FP8 prompt paths, CUDA graphs | refused / off on XPU | – | – |
+
+Not ported (engine-level, WS3b / WS5): checkpoint loaders and SYM re-quantisation of the DFlash2 draft, the engines'
+plan/buffer wiring, `F.linear` in `dflash2._linear` (not exact-path safe on XPU), graphs.
+
 ## 1. Native CUDA extensions used by A/B
 
 | Extension | Sources | A | B | XPU replacement | Port |

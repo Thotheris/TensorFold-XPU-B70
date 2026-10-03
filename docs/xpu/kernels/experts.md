@@ -55,4 +55,15 @@ fragment layout and the nvcc extension).
 
 ## Measurements
 
-(none yet)
+T0 qualified on `3a28fb4`, bundle `runs/xpu--main/3a28fb4-20261003T101551Z` (toolchain hash 858a0a59). Per-launch means
+of 5 launches queued back to back; every case `bitwise_ok` (20 repeats plus the in-bench chunk / alone check); 0 spill
+bytes. % of 608 GB/s or 183 TFLOPS on the stated bytes / flops models. `kernels:experts` 7 tests passed. 16 lanes, DPAS
+in both kernels, `n_regs` 256 (driver). 130 experts, 8 slots; bytes are the weights of the experts used (once) plus
+inputs.
+
+| Case | us | GB/s | % of 608 | TFLOPS |
+|---|---|---|---|---|
+| decode up, 16 tokens (relu^2) | 510.2 | 348.2 | 57.3 | 2.50 |
+| decode down, 16 tokens (fp32) | 551.6 | 322.8 | 53.1 | 2.32 |
+| prompt up, 1024 tokens | 5325.0 | 65.7 | 10.8 | 15.35 (8.4% of 183) |
+| prompt down, 1024 tokens (bf16) | 6202.2 | 60.5 | 9.9 | 13.18 (7.2% of 183) |

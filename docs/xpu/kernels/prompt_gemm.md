@@ -44,4 +44,15 @@ Compute-bound for large M: 2 M N K flops against ~183 TFLOPS bf16 DPAS. T0 aims 
 
 ## Measurements
 
-(none yet)
+T0 qualified on `3a28fb4`, bundle `runs/xpu--main/3a28fb4-20261003T101551Z` (toolchain hash 858a0a59). Per-launch means
+of 5 launches queued back to back; every case `bitwise_ok` (20 repeats plus the in-bench chunk / alone check); 0 spill
+bytes. % of 608 GB/s or 183 TFLOPS on the stated bytes / flops models. `kernels:prompt` 14 tests passed. 16 lanes, DPAS
+in the TTGIR, `n_regs` 256 (driver: automatic large GRF).
+
+| Case (M = 1024) | us | TFLOPS | % of 183 |
+|---|---|---|---|
+| Qwen gate/up 17408 x 5120 g128 | 8962.9 | 20.37 | 11.1 |
+| Nemotron in_proj 10304 x 2688 g64 | 2868.7 | 19.77 | 10.8 |
+
+T1 candidates: per-shape BM/BN/warps (the default 64 x 64, 8 warps is untuned), tensor descriptors for the x loads,
+dequantising the weight tile once per K step for several row tiles.
