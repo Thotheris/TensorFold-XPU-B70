@@ -20,7 +20,10 @@ out="$root/build/xpu-ext/${hash%% *}"
 [[ ! -e "$out" ]] || { echo 'Build directory already exists; use its manifest or inspect it manually.' >&2; exit 1; }
 mkdir -p "$out"
 (
+    # Intel's vars.sh reads unset variables; nounset applies again once it is sourced.
+    set +u
     source "$prefix/compiler/latest/env/vars.sh"
+    set -u
     export PYTHONPATH="$root/src" TORCH_XPU_ARCH_LIST=bmg TORCH_EXTENSIONS_DIR="$out/cache"
     "$python" -c 'from pathlib import Path; from tensorfold.xpu.build import build_aot; import sys; build_aot(Path(sys.argv[1]))' "$out"
 )
