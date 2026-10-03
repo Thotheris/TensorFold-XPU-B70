@@ -26,6 +26,7 @@ from the clean clone `~/.local/share/tensorfold-xpu/repo`, with `<dir>` from `to
 | `b4120ac` | `runs/xpu--main/b4120ac-20261003T085557Z` | env, triton-smoke, unit-host, unit-xpu | pass; tree attention, DFlash2 block attention / append on XPU; unit-xpu 114 |
 | `40c074b` | `runs/xpu--main/40c074b-20261003T095047Z` | env, triton-smoke, unit-host, unit-xpu, kernels:glue, kernels:prefill-attention, kernels:qmm | pass; prompt attention routing, `_attn_prep` host cos/sin, DFlash2 kernels, head-row views (`4dcf58b`); unit-xpu 126, qmm 52 |
 | `3a28fb4` | `runs/xpu--main/3a28fb4-20261003T101551Z` | env, triton-smoke, unit-host, unit-xpu, kernels:prompt, kernels:experts, kernels:mamba | pass; K5 (`9240c88`), K3 (`529277e`), K2 (`4733cb5`); unit-xpu 153 |
+| `9e86b3b` | `runs/xpu--main/9e86b3b-20261003T173640Z` | env, triton-smoke, unit-host, unit-xpu (native ext) | pass; kernel review fixes (`f3b06d7`) and the source-checked loader (`aa00945`); unit-xpu 171, env native smoke exact |
 | `c155552` | `runs/xpu--main/c155552-20261003T170920Z` | env, triton-smoke, unit-host, unit-xpu, kernels:prefill-attention, kernels:qmm, kernels:gdn, kernels:experts, kernels:mamba | pass; fix pass (`414da45` descriptor attention, `5f3bb56` barrier probe, `c155552` direct launches, 4-row GDN / scan); unit-xpu 169 |
 | `56756cf` | `runs/xpu--main/56756cf-20261003T103858Z` | env, triton-smoke, unit-host, unit-xpu | pass; Nemotron router (DPAS), `_conv`/`_scan`, conv commit (double-buffered), attention merge, keyed sampler (100,000 draws equal `exact_sampling`); unit-xpu 164 |
 
