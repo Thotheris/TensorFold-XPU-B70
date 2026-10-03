@@ -285,9 +285,38 @@ def run_probes(out_dir: Path) -> dict:
                 "scope": "reduced shrink/expand with runtime N-axis loop; does not certify full MoE-LoRA kernel",
                 "issue": "https://github.com/intel/intel-xpu-backend-for-triton/issues/8121"}
 
+    def launch_latency():
+        """Per-launch cost of a trivial kernel: host submit time and device time over 20 queued launches; never gates."""
+        import time
+
+        x = torch.arange(128, device=dev, dtype=torch.int32)
+        y = torch.full_like(x, 7)
+        out = torch.empty_like(x)
+        launches = {
+            "triton_add": lambda: add[(1,)](x, y, out, B=128, num_warps=4, enable_fp_fusion=False),
+            "torch_add": lambda: torch.add(x, y, out=out),
+        }
+        report = {"ok": True, "batch": 20, "samples": 10}
+        for name, launch in launches.items():
+            launch()
+            torch.xpu.synchronize()
+            host, device = [], []
+            for _ in range(10):
+                start, end = torch.xpu.Event(enable_timing=True), torch.xpu.Event(enable_timing=True)
+                t0 = time.perf_counter()
+                start.record()
+                for _ in range(20):
+                    launch()
+                end.record()
+                host.append((time.perf_counter() - t0) * 1e6 / 20)
+                torch.xpu.synchronize()
+                device.append(float(start.elapsed_time(end)) * 1e3 / 20)
+            report[name] = {"host_submit_us": statistics.median(host), "device_us": statistics.median(device)}
+        return report
+
     for name, fn in (("vector_add", vector_add), ("pointer_round_trip", pointer), ("uint64_mix", uint64_mix),
                      ("fp64_exp_log", fp64), ("cast_ranges", rounding), ("debug_barrier", barrier),
-                     ("block_m16", block_m)):
+                     ("block_m16", block_m), ("launch_latency", launch_latency)):
         if not check(name, fn):
             return result
     result["ok"] = True
