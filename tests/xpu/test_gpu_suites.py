@@ -211,3 +211,21 @@ def test_valid_fresh_measured_metrics_are_returned(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", command)
     assert suites._kernel_benchmark("glue", worktree=tmp_path, out_dir=tmp_path, timeout_s=5) == _metrics()
+
+
+def test_n_regs_comes_from_the_driver_then_the_zebin_then_the_grf_mode():
+    from types import SimpleNamespace
+
+    from tools.xpu.kbench import triton_kernel_stats
+
+    zebin = b"\x7fELF.ze_info\nexecution_env:\n  grf_count: 256\n  simd_size: 16\n"
+    driver = SimpleNamespace(n_regs=256, metadata=SimpleNamespace(grf_mode="default"), asm={"zebin": zebin})
+    assert triton_kernel_stats(driver)["n_regs"] == 256 and triton_kernel_stats(driver)["n_regs_source"] == "driver"
+    native = SimpleNamespace(n_regs=0, metadata=SimpleNamespace(grf_mode="auto"), asm={"zebin": zebin})
+    assert triton_kernel_stats(native)["n_regs"] == 256 and triton_kernel_stats(native)["n_regs_source"] == "zebin"
+    for mode, expect in (("default", 128), ("128", 128), ("256", 256)):
+        kernel = SimpleNamespace(n_regs=0, n_spills=0, metadata=SimpleNamespace(grf_mode=mode), asm={})
+        stats = triton_kernel_stats(kernel)
+        assert (stats["n_regs"], stats["n_regs_source"], stats["grf_mode"]) == (expect, "grf_mode", mode)
+    auto = SimpleNamespace(n_regs=0, metadata=SimpleNamespace(grf_mode="auto"), asm={})
+    assert triton_kernel_stats(auto)["n_regs"] is None and triton_kernel_stats(auto)["n_regs_source"] is None

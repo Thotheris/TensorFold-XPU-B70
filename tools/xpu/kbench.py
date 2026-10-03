@@ -63,20 +63,52 @@ def _counter(kernel: object, metadata: object, name: str) -> int | float | None:
     return None
 
 
+# the Intel driver reports n_regs only when a GRF flag is on the build line; `default` has none and builds at 128 GRF
+_GRF_BY_MODE = {"default": 128, "128": 128, "256": 256}
+_ZEBIN_GRF = re.compile(r"grf_count:\s*(\d+)")
+
+
+def _zebin_grf(asm: object) -> int | None:
+    """A native zebin (TRITON_XPU_GEN_NATIVE_CODE=1) records the kernel's GRF count in its .ze_info text."""
+    zebin = asm.get("zebin") if isinstance(asm, Mapping) else None
+    if not isinstance(zebin, (bytes, bytearray)):
+        return None
+    found = _ZEBIN_GRF.search(bytes(zebin).decode("latin-1"))
+    return int(found.group(1)) if found else None
+
+
+def _grf_registers(kernel: object, metadata: object, asm: object) -> tuple[int | float | None, str | None]:
+    """n_regs is the GRF budget per thread: the driver's value, else the zebin's, else the one the grf_mode implies."""
+    driver = _counter(kernel, metadata, "n_regs")
+    if driver:
+        return driver, "driver"
+    zebin = _zebin_grf(asm)
+    if zebin is not None:
+        return zebin, "zebin"
+    mode = _get(metadata, "grf_mode")
+    if isinstance(mode, str) and mode in _GRF_BY_MODE:
+        return _GRF_BY_MODE[mode], "grf_mode"
+    return None, None
+
+
 def triton_kernel_stats(kernel: object) -> dict[str, Any]:
-    """Unavailable or unreadable compiled-kernel statistics remain null."""
-    result = {"n_regs": None, "n_spills": None, "threads_per_warp": None, "dpas": None}
+    """Unavailable or unreadable compiled-kernel statistics remain null; n_spills is bytes as Level Zero reports it."""
+    result = {"n_regs": None, "n_regs_source": None, "n_spills": None, "threads_per_warp": None, "dpas": None}
     try:
         metadata = _get(kernel, "metadata")
-        for key in ("n_regs", "n_spills", "threads_per_warp"):
+        asm = _get(kernel, "asm")
+        for key in ("n_spills", "threads_per_warp"):
             result[key] = _counter(kernel, metadata, key)
+        result["n_regs"], result["n_regs_source"] = _grf_registers(kernel, metadata, asm)
         if result["threads_per_warp"] is None:
             result["threads_per_warp"] = _counter(kernel, metadata, "warp_size")
         num_warps = _counter(kernel, metadata, "num_warps")
         if num_warps is not None:
             result["num_warps"] = num_warps
+        grf_mode = _get(metadata, "grf_mode")
+        if isinstance(grf_mode, str):
+            result["grf_mode"] = grf_mode
         texts = []
-        asm = _get(kernel, "asm")
         if isinstance(asm, Mapping):
             try:
                 texts.extend(value for value in asm.values() if isinstance(value, str))

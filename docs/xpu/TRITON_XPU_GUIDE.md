@@ -128,10 +128,16 @@ Defaults: `num_warps=4`, `num_ctas=1` (**must stay 1** [S28]), `num_stages=2`, `
 - Compile stages: `ttir → ttgir → llir → spv (→ zebin)`.
   - **DPAS check:** grep the TTGIR for `#triton_intel_gpu.dpas` (also `#ttig.`). If it's absent, the dot fell back to
     FMA.
-  - **Spills:** `k = kernel[grid](...)`, then `k.n_spills` and `k.n_regs`. Units changed in PR #7976 (bytes → per-lane
-    32-bit registers), so record the version.
+  - **Spills:** `k = kernel[grid](...)`, then `k.n_spills` and `k.n_regs`.
+    - **`n_spills`** is Level Zero's `spillMemSize` in bytes, unchanged by the driver (triton-xpu 3.8.0 `driver.c`,
+      verified on the B70). The PR #7976 unit change does not apply to the driver's `load_binary`.
+    - **`n_regs` is not a measurement.** It is 128 or 256 only when a GRF flag was on the build line (`grf_mode="128"`,
+      `"256"`, or the automatic large-GRF rebuild once spills pass 1000), and 0 for `default` and `auto`. Verified
+      2026-10-03 on the B70 with `TRITON_XPU_GEN_NATIVE_CODE=1`: `default` and `auto` (for a trivial kernel) both
+      build with `grf_count: 128` in the zebin's `.ze_info`.
 - Harness helper: `tools/xpu/kbench.py` records `threads_per_warp`, `n_regs`, `n_spills` and DPAS-present for every
-  Triton kernel it times.
+  Triton kernel it times. `n_regs` is the GRF budget per thread: the driver's value, else the zebin's `grf_count`, else
+  128 for `default` and the explicit mode otherwise; `n_regs_source` says which, and `auto` without a zebin stays null.
 
 ### 1.7 Determinism
 - Within a thread, reductions are a left fold (preserved by PR #8098). Across warps they go through SLM in a batched
