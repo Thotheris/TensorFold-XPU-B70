@@ -23,6 +23,7 @@ SYM_ROWS = [1, 2, 15, 16, 17, 33, 65, 129]
 SYM_SHAPES = [(500, 5120, 128), (320, 2688, 64), (256, 17408, 128)]      # N off a tile edge; g64 and g128; long K
 BF16_SHAPES = [(1000, 5120), (48, 5120), (320, 2688)]
 RECIPE_SHAPES = [(5120, 17408, 128), (17408, 5120, 128), (10240, 5120, 128), (10304, 2688, 64), (2688, 4096, 64)]
+BF16_HEADS = [(248320, 5120), (131072, 2688)]      # 2.5 GB and 0.7 GB: drawn in bf16 (no fp32 copy over 4 GB)
 
 
 def _bits(t: torch.Tensor) -> torch.Tensor:
@@ -137,7 +138,7 @@ def test_head_row_views_give_the_stacked_copy_bits(DEV, m):
 
 @xpu_only
 @pytest.mark.parametrize("f32", [True, False], ids=["fp32", "bf16"])
-@pytest.mark.parametrize("n,k,gs", SYM_SHAPES)
+@pytest.mark.parametrize("n,k,gs", SYM_SHAPES + RECIPE_SHAPES)
 def test_sym_rows_do_not_depend_on_row_count_tile_or_position(DEV, n, k, gs, f32):
     """The unrounded fp32 sums are compared as well: bf16 rounding hides most reduction-order differences."""
 
@@ -200,7 +201,7 @@ def test_sym_config_depends_only_on_the_weight_shape():
     assert list(inspect.signature(lane_config).parameters) == ["n", "k", "gs"]
     for n, k, gs in RECIPE_SHAPES:
         sk = split_k(n, k, gs)
-        assert sk == split_k(n, k, gs) and (k // gs) % sk == 0 and lane_config(n, k, gs) == lane_config(n, k, gs)
+        assert sk in (1, 2, 4, 8) and (k // gs) % sk == 0, (n, k, gs, sk)
 
 
 @xpu_only
@@ -253,12 +254,12 @@ def test_sym_qlinear_takes_the_symmetric_path(DEV):
 
 @xpu_only
 @pytest.mark.parametrize("f32", [True, False], ids=["fp32", "bf16"])
-@pytest.mark.parametrize("n,k", BF16_SHAPES)
+@pytest.mark.parametrize("n,k", BF16_SHAPES + BF16_HEADS)
 def test_bf16_gemv_rows_do_not_depend_on_row_count_tile_or_position(DEV, n, k, f32):
     from tensorfold.xpu.kernels.qmm import bf16_matmul, split_k
 
     g = torch.Generator(device=DEV).manual_seed(n + k)
-    w = torch.randn((n, k), generator=g, device=DEV).bfloat16()
+    w = torch.randn((n, k), generator=g, device=DEV, dtype=torch.bfloat16)
     x = torch.randn((max(SYM_ROWS), k), generator=g, device=DEV).bfloat16()
     perm = torch.randperm(max(SYM_ROWS), generator=torch.Generator().manual_seed(3)).to(DEV)
     for sk in sorted({1, split_k(n, k, 64)}):

@@ -101,11 +101,20 @@ Correctness on the same bundle (`unit-xpu` 37 passed, `kernels:qmm` 31 passed, 0
 M x BM x split-K for the SYM and bf16 kernels, SYM dequant exact, fp64 tolerance, xs from every producer equals
 `_group_sums`.
 
-T0 reads weights at 6-20% of peak and the 4-bit kernels spill at the A shapes; throughput is the same at M=1 and M=16, so
-the kernel is not bandwidth-limited. T1 tuning (`num_warps`, `grf_mode`, split-K per shape) is the next step.
+Timings are per-launch means of 20 queued launches through the Python wrapper (sym: plus the split-K reduce launch).
+Every small shape sits on a 117-125 us floor (in_proj_a/b moves 0.5 MB in 117 us; Nemotron in_proj and out_proj take
+the same time for 14.7 and 5.5 MB), so their % of peak measures launch latency, not bandwidth. `triton-smoke`'s
+`launch_latency` probe splits that floor into host submit and device time. The A shapes above the floor (down
+1302 us, gate/up 775 us, qkv 764 us) are genuinely slow: 6-10% of peak, spilling 5-9 KB at 256 GRF. M=1 and M=16
+cost the same because the dot pads M to BM = 32. T1 (`num_warps`, `grf_mode`, BN, split-K per shape) is the next step.
 
 ## Open issues
 
 - Resolved on da2a34f: the BM sweep (16..128) is bitwise row-invariant on this shape, and xs from `_group_sums`,
   `_add_rmsnorm` and `_swiglu` is equal.
 - 4-bit decode is far from the roofline (above); the A shapes spill 5-9 KB.
+- A ~120 us per-launch floor would dominate decode (several launches per layer); source pending `launch_latency`.
+- `qmm_fast.rows`, `matmul_rows` and `matmul_partial` take tiled (CUDA) weights only; SYM weights stay N-major, so the
+  XPU engine (WS5) must not route them there.
+- The SYM contract computes `P*s - 8*s*xs`, which cancels when `q` sits near 8; the fp64 tolerance (2^-7 of the max)
+  passes, but the A/B against `dot(x, q - 8) * s` noted above is still open.
