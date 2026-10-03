@@ -74,3 +74,32 @@ def test_gdn_pre_matches_torch(DEV):
     gr = torch.exp(-torch.exp(alog) * torch.nn.functional.softplus(a.float() + dtb))
     assert torch.allclose(g, gr, rtol=1e-5, atol=1e-6)
     assert torch.allclose(beta, torch.sigmoid(b.float()), atol=1e-6)
+
+
+@pytest.mark.parametrize("mrope", [False, True])
+def test_attn_prep_rows_alone_and_against_torch(DEV, mrope):
+    """q/k RMS norm then rotate-half rope: a row alone equals the row in a window, and values match torch."""
+
+    dev = DEV
+    W, H, HKV, D, half, eps = 7, 24, 4, 256, 32, 1e-6
+    gen = torch.Generator(device=dev).manual_seed(3)
+    qg = torch.randn(W, H * 2 * D, generator=gen, device=dev).bfloat16()
+    k = torch.randn(W, HKV * D, generator=gen, device=dev).bfloat16()
+    qn = (torch.rand(D, generator=gen, device=dev) + 0.5).bfloat16()
+    kn = (torch.rand(D, generator=gen, device=dev) + 0.5).bfloat16()
+    inv = 1.0 / (10_000_000 ** (torch.arange(half, device=dev).float() / half))
+    pos = (torch.randint(0, 5000, (3, W) if mrope else (W,), generator=gen, device=dev)).int()
+    q_out, k_out = glue.attn_prep(qg, k, qn, kn, pos, inv, eps, heads=H, kv_heads=HKV, head_dim=D)
+    for r in range(W):
+        one = glue.attn_prep(qg[r:r + 1], k[r:r + 1], qn, kn, pos[..., r:r + 1].contiguous(), inv, eps, heads=H,
+                             kv_heads=HKV, head_dim=D)
+        assert torch.equal(one[0].view(torch.int16), q_out[r:r + 1].view(torch.int16)), f"q row {r}"
+        assert torch.equal(one[1].view(torch.int16), k_out[r:r + 1].view(torch.int16)), f"k row {r}"
+    cos, sin = glue.rope_tables(pos, inv, (11, 11, 10))
+    x = qg.reshape(W, H, 2 * D)[..., :D].float()
+    xn = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps) * qn.float()).bfloat16().float()
+    rot = xn.clone()
+    c, s = cos[:, None, :], sin[:, None, :]
+    rot[..., :half] = xn[..., :half] * c - xn[..., half:2 * half] * s
+    rot[..., half:2 * half] = xn[..., half:2 * half] * c + xn[..., :half] * s
+    assert (q_out.float() - rot).abs().max() < 0.05

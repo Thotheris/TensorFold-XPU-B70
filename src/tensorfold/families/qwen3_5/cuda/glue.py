@@ -152,9 +152,10 @@ def swiglu(gate: torch.Tensor, up: torch.Tensor):
 
 
 @triton.jit
-def _attn_prep(QG, KV, QN, KN, POS, INV, QOUT, KOUT, eps,
+def _attn_prep(QG, KV, QN, KN, POS, INV, QOUT, KOUT, eps, COS, SIN,
                H: tl.constexpr, HKV: tl.constexpr, D: tl.constexpr, HALF: tl.constexpr,
-               MROPE: tl.constexpr, ROWS: tl.constexpr, HSEC: tl.constexpr, WSEC: tl.constexpr):
+               MROPE: tl.constexpr, ROWS: tl.constexpr, HSEC: tl.constexpr, WSEC: tl.constexpr,
+               HOST_TRIG: tl.constexpr = False):
     """Program (row, head): heads 0..H-1 are queries (from [q | gate] rows), H..H+HKV-1 keys."""
 
     row = tl.program_id(0)
@@ -175,9 +176,13 @@ def _attn_prep(QG, KV, QN, KN, POS, INV, QOUT, KOUT, eps,
     else:
         pos = tl.load(POS + row).to(tl.float32)
         i = tl.where(d < HALF, d, tl.where(d < 2 * HALF, d - HALF, 0))
-    ang = pos * tl.load(INV + i)
-    cos = tl.cos(ang)
-    sin = tl.sin(ang)
+    if HOST_TRIG:                     # XPU: cos and sin of the same fp32 angle, computed outside the kernel
+        cos = tl.load(COS + row * HALF + i)
+        sin = tl.load(SIN + row * HALF + i)
+    else:
+        ang = pos * tl.load(INV + i)
+        cos = tl.cos(ang)
+        sin = tl.sin(ang)
     # partner element for rotate-half: d < HALF pairs with d + HALF and back
     partner = tl.where(d < HALF, d + HALF, tl.where(d < 2 * HALF, d - HALF, d))
     if is_q:
@@ -194,6 +199,22 @@ def _attn_prep(QG, KV, QN, KN, POS, INV, QOUT, KOUT, eps,
         tl.store(KOUT + (row * HKV + head - H) * D + d, out)
 
 
+def rope_tables(pos: torch.Tensor, inv_freq: torch.Tensor,
+                mrope_section: tuple[int, int, int]) -> tuple[torch.Tensor, torch.Tensor]:
+    """(W, half) fp32 cos and sin of ``pos * inv_freq``; each rope pair takes its M-RoPE axis as ``_attn_prep`` does."""
+
+    half = inv_freq.numel()
+    i = torch.arange(half, device=pos.device)
+    if pos.ndim == 2:
+        axis = torch.where((i % 3 == 1) & (i < 3 * mrope_section[1]), 1,
+                           torch.where((i % 3 == 2) & (i < 3 * mrope_section[2]), 2, 0))
+        p = pos.float()[axis].t()                                           # (W, half): each pair's coordinate
+    else:
+        p = pos.float()[:, None].expand(-1, half)
+    ang = p * inv_freq.float()[None, :]
+    return torch.cos(ang).contiguous(), torch.sin(ang).contiguous()
+
+
 def attn_prep(qg: torch.Tensor, k: torch.Tensor, q_norm: torch.Tensor, k_norm: torch.Tensor,
               pos: torch.Tensor, inv_freq: torch.Tensor, eps: float, *, heads: int, kv_heads: int, head_dim: int,
               mrope_section: tuple[int, int, int] = (11, 11, 10)):
@@ -208,9 +229,16 @@ def attn_prep(qg: torch.Tensor, k: torch.Tensor, q_norm: torch.Tensor, k_norm: t
     pos = pos.contiguous()
     qo = torch.empty((W, heads, head_dim), dtype=torch.bfloat16, device=qg.device)
     ko = torch.empty((W, kv_heads, head_dim), dtype=torch.bfloat16, device=qg.device)
-    _attn_prep[(W, heads + kv_heads)](qg, k, q_norm, k_norm, pos, inv_freq, qo, ko, eps, H=heads, HKV=kv_heads,
-                                      D=head_dim, HALF=inv_freq.numel(), MROPE=multi, ROWS=W if multi else 0,
-                                      HSEC=mrope_section[1], WSEC=mrope_section[2], num_warps=2)
+    half = inv_freq.numel()
+    if qg.device.type == "xpu":
+        cos, sin = rope_tables(pos, inv_freq, mrope_section)
+        extra = {"HOST_TRIG": True, "enable_fp_fusion": False}
+    else:
+        cos = sin = inv_freq
+        extra = {}
+    _attn_prep[(W, heads + kv_heads)](qg, k, q_norm, k_norm, pos, inv_freq, qo, ko, eps, cos, sin, H=heads,
+                                      HKV=kv_heads, D=head_dim, HALF=half, MROPE=multi, ROWS=W if multi else 0,
+                                      HSEC=mrope_section[1], WSEC=mrope_section[2], num_warps=2, **extra)
     return qo, ko
 
 

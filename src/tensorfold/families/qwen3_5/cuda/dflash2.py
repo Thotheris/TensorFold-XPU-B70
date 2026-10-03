@@ -95,7 +95,8 @@ def _dconv(x: torch.Tensor, dyn: torch.Tensor, base: torch.Tensor, branch: int, 
     block = 1024
     _dconv_kernel[(rows, triton.cdiv(d, block))](x, dyn, base, residual if residual is not None else x, out,
                                                  seg or rows, D=d, G=d // group_size, GS=group_size, BRANCH=branch,
-                                                 HAS_RES=residual is not None, BLOCK=block, num_warps=4)
+                                                 HAS_RES=residual is not None, BLOCK=block, num_warps=4,
+                                                 **({"enable_fp_fusion": False} if x.device.type == "xpu" else {}))
     return out
 
 
@@ -441,7 +442,9 @@ class DFlash2:
         _prep_kernel[(rows, heads + 2 * self.kv_local)](qkv, self.weights[prefix + "q_norm.weight"],
                                                         self.weights[prefix + "k_norm.weight"], cos, sin, q, k, v,
                                                         rows, qkv.stride(0), self.eps, H=heads, HKV=self.kv_local,
-                                                        HALF=d // 2, num_warps=1)
+                                                        HALF=d // 2, num_warps=1,
+                                                        **({"enable_fp_fusion": False} if qkv.device.type == "xpu"
+                                                           else {}))
         return q, k, v
 
     def _layer_fast(self, i: int, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, ctx: list,

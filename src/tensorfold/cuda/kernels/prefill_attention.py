@@ -11,6 +11,9 @@ import triton.language as tl
 
 BM = 64
 BN = 64
+# XPU launches by head dim (shape-only; every tile choice gave the same bits in a B70 sweep, docs/xpu/STATUS.md)
+XPU_LAUNCH = {64: {"num_warps": 8, "num_stages": 2}, 128: {"num_warps": 8, "num_stages": 1},
+              256: {"num_warps": 8, "num_stages": 1, "grf_mode": "256"}}
 
 
 @triton.jit
@@ -65,7 +68,7 @@ def attention(q: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, p0:
     w, h, d = q.shape
     hk = _check(q, k_cache, v_cache, p0)
     out = torch.empty_like(q)
-    if d == 64:
+    if d == 64 or q.device.type == "xpu":        # XPU has no CUDA extension: every head dim takes the Triton kernel
         return triton_attention(q, k_cache, v_cache, p0, scale=scale, out=out)
     _ext().prefill_attention(q, k_cache, v_cache, out, p0, scale, heads_a_block(h // hk))
     return out
@@ -78,8 +81,12 @@ def triton_attention(q: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tens
     w, h, d = q.shape
     hk = _check(q, k_cache, v_cache, p0)
     out = torch.empty_like(q) if out is None else out
+    if q.device.type == "xpu":
+        launch = {**XPU_LAUNCH[d], "enable_fp_fusion": False}
+    else:
+        launch = {"num_warps": 8, "num_stages": 1 if d > 128 else 2}
     _attend[(triton.cdiv(w, BM), h)](q, k_cache, v_cache, out, p0, w, H=h, HK=hk, D=d, BM=BM, BN=BN, SCALE=scale,
-                                     num_warps=8, num_stages=1 if d > 128 else 2)
+                                     **launch)
     return out
 
 
