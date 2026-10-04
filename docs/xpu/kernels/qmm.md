@@ -26,7 +26,7 @@ what the WS3b loader writes (GPTQ `[K/8, N]` transposed). `q in 0..15`, `z = 8` 
 
 ## Layouts in/out (enforced before any launch)
 
-`sym_matmul` and `bf16_matmul` check metadata only (shape, dtype, stride, device; never tensor
+`sym_matmul`, `prompt_matmul` and `bf16_matmul` check metadata only (shape, dtype, stride, device; never tensor
 contents, no GPU sync) through `xpu/kernels/layout.py`, and raise `ValueError` before allocating or launching:
 
 | Operand | Contract | Why |

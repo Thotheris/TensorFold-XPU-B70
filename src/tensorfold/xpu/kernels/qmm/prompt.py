@@ -8,6 +8,8 @@ import torch
 import triton
 import triton.language as tl
 
+from ..layout import check_device, check_rows, check_sym
+
 __all__ = ["PROMPT_CONFIG", "PromptConfig", "prompt_config", "prompt_matmul"]
 
 BK = 64                   # K columns a step: one scale group or half of one
@@ -66,19 +68,19 @@ def _prompt(X, W, S, OUT, M, N, K, ldx, GS: tl.constexpr, BM: tl.constexpr, BN: 
 
 def prompt_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, *, gs: int, f32: bool = False,
                   config: PromptConfig | None = None) -> torch.Tensor:
-    """x (M, K) bf16 times the symmetric INT4 ``weight`` (N, K/8) transposed -> (M, N); any chunking, the same bits."""
+    """x (M, K) bf16 times the symmetric INT4 ``weight`` (N, K/8) transposed -> (M, N); any chunking, the same bits.
 
-    if x.dtype != torch.bfloat16 or x.dim() != 2 or x.stride(1) != 1:
-        raise ValueError("prompt_matmul: x must be a 2-D bf16 tensor with unit column stride")
-    if gs not in (64, 128):
-        raise ValueError("prompt_matmul: the group size must be 64 or 128")
+    ``weight`` and ``scales`` must be contiguous (row slices of a contiguous weight are); x rows may be strided.
+    """
+
+    check_rows("prompt_matmul", x)
     m, k = x.shape
-    n = weight.shape[0]
-    if weight.dtype != torch.int32 or weight.shape[1] * 8 != k or k % gs or m < 1:
-        raise ValueError(f"prompt_matmul: weight {tuple(weight.shape)} does not match K={k}, gs={gs}")
-    if (scales.dtype not in (torch.float16, torch.bfloat16) or scales.shape != (n, k // gs)
-            or not scales.is_contiguous()):
-        raise ValueError(f"prompt_matmul: scales must be a contiguous fp16 or bf16 ({n}, {k // gs}) tensor")
+    if weight.dim() != 2:
+        raise ValueError(f"prompt_matmul: weight must be 2-D (N, K/8), got {tuple(weight.shape)}")
+    n = check_sym("prompt_matmul", weight, scales, k, gs)
+    check_device("prompt_matmul", x, weight, scales)
+    if m < 1:
+        raise ValueError("prompt_matmul takes at least one row")
     cfg = config or prompt_config(n, k, gs)
     out = torch.empty((m, n), dtype=torch.float32 if f32 else torch.bfloat16, device=x.device)
     grid = (triton.cdiv(m, cfg.bm), triton.cdiv(n, cfg.bn))

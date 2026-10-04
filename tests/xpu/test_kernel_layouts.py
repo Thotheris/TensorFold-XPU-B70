@@ -74,7 +74,7 @@ def _qmm(op, x, words, scales, gs, xs=None):
     return P.prompt_matmul(x, words, scales, gs=gs)
 
 
-OPS = ["sym"]
+OPS = ["sym", "prompt"]
 N, K = 96, 512
 
 

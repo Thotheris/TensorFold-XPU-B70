@@ -10,6 +10,15 @@ The K4 weight shapes (`docs/xpu/kernels/qmm.md`): Qwen 5120 x 17408, 17408 x 512
 10304 x 2688, 2688 x 4096 (g64). Words `(N, K/8)` int32 low nibble first, scales `(N, K/gs)` fp16 or bf16 as stored.
 x bf16 `(M, K)`, output bf16 (or fp32 with `f32=True`).
 
+## Layouts in/out (enforced before any launch)
+
+The K4 contract (`qmm.md`, "Layouts in/out"): x 2-D bf16 with unit column stride and any row stride, M >= 1; words
+contiguous int32 `(N, K/8)`, N >= 1; scales contiguous fp16 or bf16 `(N, K/gs)`, gs in {64, 128}; one device.
+Noncontiguous words or scales raise `ValueError` before the launch; the output is the wrapper's contiguous `(M, N)`.
+Row slices of a contiguous weight are accepted and, launched with the parent's `config=prompt_config(*parent)`, give the
+parent's columns bit for bit (`tests/cuda/test_xpu_layouts.py`, `xpu_kernel("prompt")`: offset and every-other-row x
+views, M in {1, 63, 64, 65, 300}, spans (0,1), (63,65), (17,300), (999,1000)).
+
 ## Arithmetic contract
 
 ```

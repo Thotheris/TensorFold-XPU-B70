@@ -10,9 +10,11 @@ if not device_available() or DEVICE != "xpu":
     pytest.skip("needs an XPU", allow_module_level=True)
 
 from tensorfold.families.qwen3_5.cuda.qmm import group_sums  # noqa: E402
-from tensorfold.xpu.kernels.qmm import bf16_matmul, lane_config, slices, sym_matmul  # noqa: E402
+from tensorfold.xpu.kernels.qmm import bf16_matmul, lane_config, prompt_matmul, slices, sym_matmul  # noqa: E402
+from tensorfold.xpu.kernels.qmm.prompt import prompt_config  # noqa: E402
 
 qmm = pytest.mark.xpu_kernel("qmm")
+prompt = pytest.mark.xpu_kernel("prompt")
 
 SHAPES = [(1000, 5120, 128), (320, 2688, 64)]
 SPANS = [(0, 1), (63, 65), (17, 300), (999, 1000)]                 # clipped to N below
@@ -81,3 +83,19 @@ def test_bf16_gemv_views_give_the_contiguous_bits():
             assert _same(bf16_matmul(v, w, **plan), full), name
         for a, b in _spans(n):
             assert _same(bf16_matmul(views["offset"], w[a:b], **plan), full[:, a:b].contiguous()), (m, a, b)
+
+
+@prompt
+@pytest.mark.parametrize("f32", [True, False], ids=["fp32", "bf16"])
+@pytest.mark.parametrize("n,k,gs", SHAPES)
+def test_prompt_views_give_the_contiguous_bits(n, k, gs, f32):
+    words, scales = _sym(n, k, gs, 3 * n + k, torch.bfloat16 if gs == 64 else torch.float16)
+    cfg = prompt_config(n, k, gs)
+    for m in (1, 63, 64, 65, 300):
+        x, views = _views(m, k, m)
+        full = prompt_matmul(x, words, scales, gs=gs, f32=f32, config=cfg)
+        for name, v in views.items():
+            assert _same(prompt_matmul(v, words, scales, gs=gs, f32=f32, config=cfg), full), (name, m)
+        for a, b in _spans(n):
+            got = prompt_matmul(views["every other row"], words[a:b], scales[a:b], gs=gs, f32=f32, config=cfg)
+            assert _same(got, full[:, a:b].contiguous()), (m, a, b)
