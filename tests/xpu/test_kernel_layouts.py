@@ -184,3 +184,131 @@ def test_bf16_gemv_refuses_strided_weights_and_other_devices():
             B.bf16_matmul(_x(5, K), bad)
     with pytest.raises(ValueError, match="device"):
         B.bf16_matmul(_x(5, K), w.to("meta"))
+
+
+# ---- grouped experts (decode and prompt) ----
+
+E, SLOTS, EN, EK = 4, 2, 32, 256
+
+
+def _experts(gs, n=EN, k=EK, scale_dtype=torch.float16, device="cpu"):
+    return (torch.zeros((E, n, k // 8), dtype=torch.int32, device=device),
+            torch.ones((E, n, k // gs), dtype=scale_dtype, device=device))
+
+
+def _plan(kernel, rows=3, experts=E):
+    picks = torch.tensor([[(r + s) % E for s in range(SLOTS)] for r in range(rows)], dtype=torch.int32)
+    return X.plan(picks, experts, X.TILE if kernel == "decode" else X.PREFILL_TILE)
+
+
+def _run(kernel, x, words, scales, p, *, up, gs=64, epi=None, out=None):
+    epi = (X.EPI_RELU2 if up else X.EPI_FP32 if kernel == "decode" else X.EPI_BF16) if epi is None else epi
+    fn = X.decode if kernel == "decode" else X.prompt
+    return fn(x, words, scales, p, from_tokens=up, gs=gs, epi=epi, out=out)
+
+
+def _out_dtype(kernel, up):
+    return torch.float32 if kernel == "decode" and not up else torch.bfloat16
+
+
+KERNELS = ["decode", "prompt"]
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+@pytest.mark.parametrize("gs", [64, 128])
+@pytest.mark.parametrize("up", [True, False], ids=["up", "down"])
+def test_expert_supported_layouts_reach_the_launch(kernel, gs, up):
+    words, scales = _experts(gs)
+    p = _plan(kernel)
+    rows = 3 if up else 3 * SLOTS
+    for i, x in enumerate((_x(rows, EK), _x(rows, EK + 64)[:, 64:], _x(2 * rows, EK)[::2])):
+        _launches(f"x {i}", _run, kernel, x, words, scales, p, up=up, gs=gs)
+    big = torch.zeros((3 * SLOTS + 2, EN), dtype=_out_dtype(kernel, up))
+    # an exact-size contiguous slice of a larger buffer
+    _launches("out slice", _run, kernel, _x(rows, EK), words, scales, p, up=up, gs=gs, out=big[1:-1])
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+@pytest.mark.parametrize("gs", [64, 128])
+def test_expert_unsupported_weights_are_refused(kernel, gs):
+    words, scales = _experts(gs)
+    k8, kg = EK // 8, EK // gs
+    other = 128 if gs == 64 else 64
+    bad_words = {
+        "int64": words.to(torch.int64),
+        "row stride 2 K/8": torch.zeros((E, EN, 2 * k8), dtype=torch.int32)[..., :k8],
+        "expert stride padded": torch.zeros((E, EN + 1, k8), dtype=torch.int32)[:, :EN],
+        "N, K swapped": torch.zeros((E, k8, EN), dtype=torch.int32).transpose(1, 2),
+        "one expert": words[0],
+    }
+    bad_scales = {
+        "the other group size's scales": torch.ones((E, EN, EK // other), dtype=torch.float16),
+        "fp32": scales.float(),
+        "every other column": torch.ones((E, EN, 2 * kg), dtype=torch.float16)[..., ::2],
+        "transposed": torch.ones((E, kg, EN), dtype=torch.float16).transpose(1, 2),
+        "fewer experts": scales[:-1],
+    }
+    p = _plan(kernel)
+    for name, w in bad_words.items():
+        _refused(name, _run, kernel, _x(3, EK), w, scales, p, up=True, gs=gs)
+    for name, s in bad_scales.items():
+        assert "scales" in _refused(name, _run, kernel, _x(3, EK), words, s, p, up=True, gs=gs), name
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+@pytest.mark.parametrize("up", [True, False], ids=["up", "down"])
+def test_expert_unsupported_out_buffers_are_refused(kernel, up):
+    words, scales = _experts(64)
+    p = _plan(kernel)
+    pairs = 3 * SLOTS
+    dtype = _out_dtype(kernel, up)
+    other = torch.bfloat16 if dtype == torch.float32 else torch.float32
+    bad = {
+        "one pair short": torch.empty((pairs - 1, EN), dtype=dtype),
+        "one column short": torch.empty((pairs, EN - 1), dtype=dtype),
+        "one pair long": torch.empty((pairs + 1, EN), dtype=dtype),
+        "wrong dtype": torch.empty((pairs, EN), dtype=other),
+        "fp16": torch.empty((pairs, EN), dtype=torch.float16),
+        "row stride 2 N": torch.empty((pairs, 2 * EN), dtype=dtype)[:, :EN],
+        "transposed": torch.empty((EN, pairs), dtype=dtype).T,
+        "flat": torch.empty((pairs * EN,), dtype=dtype),
+        "other device": torch.empty((pairs, EN), dtype=dtype, device="meta"),
+    }
+    for name, out in bad.items():
+        assert "out" in _refused(name, _run, kernel, _x(3 if up else pairs, EK), words, scales, p, up=up, out=out), name
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+def test_expert_plans_and_rows_that_do_not_match_are_refused(kernel):
+    words, scales = _experts(64)
+    p = _plan(kernel)
+    pairs = 3 * SLOTS
+    with pytest.raises(ValueError):                  # pair rows handed to the up projection
+        _run(kernel, _x(pairs, EK), words, scales, p, up=True)
+    with pytest.raises(ValueError):                  # token rows handed to the down projection
+        _run(kernel, _x(3, EK), words, scales, p, up=False)
+    with pytest.raises(ValueError):                  # a plan over more experts than the stack holds
+        _run(kernel, _x(3, EK), words, scales, _plan(kernel, experts=E + 1), up=True)
+    with pytest.raises(ValueError):
+        _run(kernel, _x(3, EK), words, scales, X.Plan(p.members.long(), p.items, p.tile, p.slots, p.experts), up=True)
+    with pytest.raises(ValueError):
+        items = torch.zeros((3, p.items.shape[0]), dtype=torch.int32).T
+        _run(kernel, _x(3, EK), words, scales, X.Plan(p.members, items, p.tile, p.slots, p.experts), up=True)
+    with pytest.raises(ValueError):
+        _run(kernel, _x(3, EK), words, scales, p, up=True, epi=2)
+    for x in (_x(3, EK).half(), _x(3, 2 * EK)[:, ::2], _x(3, EK + 64)):
+        with pytest.raises(ValueError):
+            _run(kernel, x, words, scales, p, up=True)
+
+
+@pytest.mark.parametrize("kernel", KERNELS)
+def test_expert_operands_on_other_devices_are_refused(kernel):
+    words, scales = _experts(64)
+    meta_w, meta_s = _experts(64, device="meta")
+    p = _plan(kernel)
+    for w, s in ((meta_w, scales), (words, meta_s)):
+        with pytest.raises(ValueError, match="device"):
+            _run(kernel, _x(3, EK), w, s, p, up=True)
+    meta_plan = X.Plan(p.members.to("meta"), p.items.to("meta"), p.tile, p.slots, p.experts)
+    with pytest.raises(ValueError, match="device"):
+        _run(kernel, _x(3, EK), words, scales, meta_plan, up=True)

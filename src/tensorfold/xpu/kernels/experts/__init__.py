@@ -9,6 +9,7 @@ import triton
 import triton.language as tl
 
 from ..launch import Launcher
+from ..layout import check_device, check_out, check_rows, check_sym
 
 __all__ = ["PREFILL_TILE", "TILE", "Plan", "decode", "max_items", "pack_xpu", "plan", "prompt"]
 
@@ -33,6 +34,7 @@ class Plan:
     items: torch.Tensor       # (max_items, 3) int32; unused items have count 0
     tile: int
     slots: int
+    experts: int              # every item's expert id is below this (the weights' stack must hold exactly this many)
 
 
 def plan(picks: torch.Tensor, experts: int, tile: int = TILE) -> Plan:
@@ -51,7 +53,7 @@ def plan(picks: torch.Tensor, experts: int, tile: int = TILE) -> Plan:
     j = i - (ends - tiles)[e]
     count = torch.clamp(counts[e] - tile * j, 0, tile) * (i < ends[-1])
     items = torch.stack([e, first[e] + tile * j, count], 1).to(torch.int32).contiguous()
-    return Plan(members.contiguous(), items, tile, slots)
+    return Plan(members.contiguous(), items, tile, slots, experts)
 
 
 def pack_xpu(words: list[torch.Tensor], scales: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -159,17 +161,36 @@ _LAUNCHERS = {"decode": Launcher(lambda: _decode), "prompt": Launcher(lambda: _p
 
 def _run(kernel: str, launch: dict, x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, *,
          from_tokens: bool, gs: int, epi: int, out: torch.Tensor | None) -> torch.Tensor:
-    if x.dtype != torch.bfloat16 or x.dim() != 2 or x.stride(1) != 1:
-        raise ValueError("experts: x must be 2-D bf16 rows with unit column stride")
-    e, n, k8 = words.shape
+    """Checks every shape, dtype, stride, device and capacity the launch addresses (metadata only), then launches."""
+
+    if epi not in (EPI_FP32, EPI_RELU2, EPI_BF16):
+        raise ValueError(f"experts: epilogue {epi} is not EPI_FP32, EPI_RELU2 or EPI_BF16")
+    check_rows("experts", x)
+    if words.dim() != 3:
+        raise ValueError(f"experts: words must be a stack [E, N, K/8], got {tuple(words.shape)}")
+    e, _, k8 = words.shape
     k = k8 * 8
-    if x.shape[1] != k or k % gs or scales.shape != (e, n, k // gs) or gs not in (64, 128):
-        raise ValueError(f"experts: x (., {x.shape[1]}) does not match weights {tuple(words.shape)} in groups of {gs}")
-    pairs = p.members.numel()
+    if x.shape[1] != k:
+        raise ValueError(f"experts: x (., {x.shape[1]}) does not match weights {tuple(words.shape)}")
+    n = check_sym("experts", words, scales, k, gs)
+    members, items = p.members, p.items
+    if (members.dtype != torch.int32 or members.dim() != 1 or not members.is_contiguous() or items.dtype != torch.int32
+            or items.dim() != 2 or items.shape[1] != 3 or not items.is_contiguous()):
+        raise ValueError("experts: the plan's members must be contiguous (pairs,) int32 and items (., 3) int32")
+    if p.experts != e:
+        raise ValueError(f"experts: the plan routes over {p.experts} experts, the weights stack {e}")
+    pairs = members.numel()
+    slots = p.slots if from_tokens else 1                # up reads a token per `slots` pairs, down a row a pair
+    if slots < 1 or pairs % slots or x.shape[0] != pairs // slots:
+        raise ValueError(f"experts: x has {x.shape[0]} rows; the plan's {pairs} pairs read one per {slots} pairs")
     dtype = torch.float32 if epi == EPI_FP32 else torch.bfloat16
-    out = torch.empty((pairs, n), dtype=dtype, device=x.device) if out is None else out
-    grid = (p.items.shape[0], triton.cdiv(n, launch["bn"]))
-    _LAUNCHERS[kernel](grid, x, x.stride(0), p.slots if from_tokens else 0, words, scales, p.items, p.members, out, n,
+    if out is None:
+        out = torch.empty((pairs, n), dtype=dtype, device=x.device)
+    else:
+        check_out("experts", out, (pairs, n), dtype, x.device)
+    check_device("experts", x, words, scales, members, items, out)
+    grid = (items.shape[0], triton.cdiv(n, launch["bn"]))
+    _LAUNCHERS[kernel](grid, x, x.stride(0), p.slots if from_tokens else 0, words, scales, items, members, out, n,
                        k, GS=gs, BN=launch["bn"], T=p.tile, EPI=epi, num_warps=launch["num_warps"],
                        num_stages=launch["num_stages"], enable_fp_fusion=False)
     return out
@@ -177,7 +198,10 @@ def _run(kernel: str, launch: dict, x: torch.Tensor, words: torch.Tensor, scales
 
 def decode(x: torch.Tensor, words: torch.Tensor, scales: torch.Tensor, p: Plan, *, from_tokens: bool, gs: int,
            epi: int, out: torch.Tensor | None = None) -> torch.Tensor:
-    """Each pair's projection by its expert: x holds tokens (``from_tokens``, up) or a row a pair (down)."""
+    """Each pair's projection by its expert: x holds tokens (``from_tokens``, up) or a row a pair (down).
+
+    ``out``, when given, must be the contiguous (pairs, N) fp32 (EPI_FP32) or bf16 buffer the kernel writes.
+    """
 
     if p.tile != TILE:
         raise ValueError(f"decode takes a plan of {TILE}-pair items")
