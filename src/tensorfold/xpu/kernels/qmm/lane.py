@@ -7,6 +7,7 @@ import triton
 import triton.language as tl
 
 from ..launch import Launcher
+from ..layout import check_device, check_rows, check_sym
 from .config import LaneConfig, lane_config, slices, split_k
 
 __all__ = ["sym_matmul"]
@@ -86,21 +87,19 @@ _LAUNCH_REDUCE = Launcher(lambda: _reduce)
 def sym_matmul(x: torch.Tensor, weight: torch.Tensor, scales: torch.Tensor, xs: torch.Tensor, *, gs: int,
                sk: int | None = None, bm: int | None = None, f32: bool = False,
                config: LaneConfig | None = None) -> torch.Tensor:
-    """x (M, K) bf16 times the symmetric INT4 ``weight`` (N, K/8) transposed -> (M, N) bf16; ``xs``: (M, K/64) fp32."""
+    """x (M, K) bf16 times the symmetric INT4 ``weight`` (N, K/8) transposed -> (M, N) bf16; ``xs``: (M, K/64) fp32.
 
-    if x.dtype != torch.bfloat16 or x.dim() != 2 or x.stride(1) != 1:
-        raise ValueError("sym_matmul: x must be a 2-D bf16 tensor with unit column stride")
-    if gs not in (64, 128):
-        raise ValueError("sym_matmul: the group size must be 64 or 128")
+    ``weight`` and ``scales`` must be contiguous (row slices of a contiguous weight are); x rows may be strided.
+    """
+
+    check_rows("sym_matmul", x)
     m, k = x.shape
-    n = weight.shape[0]
-    if weight.dtype != torch.int32 or weight.shape[1] * 8 != k or k % gs:
-        raise ValueError(f"sym_matmul: weight {tuple(weight.shape)} {weight.dtype} does not match K={k}, gs={gs}")
-    if (scales.dtype not in (torch.float16, torch.bfloat16) or scales.shape != (n, k // gs)
-            or not scales.is_contiguous()):
-        raise ValueError(f"sym_matmul: scales must be a contiguous fp16 or bf16 ({n}, {k // gs}) tensor")
+    if weight.dim() != 2:
+        raise ValueError(f"sym_matmul: weight must be 2-D (N, K/8), got {tuple(weight.shape)}")
+    n = check_sym("sym_matmul", weight, scales, k, gs)
     if xs.dtype != torch.float32 or xs.shape != (m, k // 64) or not xs.is_contiguous():
         raise ValueError(f"sym_matmul: xs must be a contiguous fp32 ({m}, {k // 64}) tensor")
+    check_device("sym_matmul", x, weight, scales, xs)
     if m < 1:
         raise ValueError("sym_matmul takes at least one row")
     cfg = config or lane_config(n, k, gs)

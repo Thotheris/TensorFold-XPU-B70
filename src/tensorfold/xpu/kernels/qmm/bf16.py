@@ -7,6 +7,7 @@ import triton
 import triton.language as tl
 
 from ..launch import Launcher
+from ..layout import check_device
 from .config import BK, LaneConfig, lane_config, slices, split_k
 from .lane import _LAUNCH_REDUCE
 
@@ -52,8 +53,11 @@ def bf16_matmul(x: torch.Tensor, weight: torch.Tensor, *, sk: int | None = None,
     if x.dtype != torch.bfloat16 or x.dim() != 2 or x.stride(1) != 1:
         raise ValueError("bf16_matmul: x must be a 2-D bf16 tensor with unit column stride")
     m, k = x.shape
-    if weight.dtype != torch.bfloat16 or weight.dim() != 2 or weight.shape[1] != k or not weight.is_contiguous():
-        raise ValueError(f"bf16_matmul: weight {tuple(weight.shape)} {weight.dtype} does not match K={k}")
+    if (weight.dtype != torch.bfloat16 or weight.dim() != 2 or weight.shape[1] != k or weight.shape[0] < 1
+            or not weight.is_contiguous()):
+        raise ValueError(f"bf16_matmul: weight {tuple(weight.shape)} {weight.dtype} does not match K={k} or is not "
+                         "contiguous")
+    check_device("bf16_matmul", x, weight)
     if k % BK or m < 1:
         raise ValueError(f"bf16_matmul takes at least one row and K a multiple of {BK}")
     n = weight.shape[0]

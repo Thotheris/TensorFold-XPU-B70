@@ -24,6 +24,29 @@ kernels in `src/tensorfold/xpu/kernels/qmm/`.
 Scales are fp16 or bf16 and stay as stored. Words are the N-major layout `(N, K/8)` int32, low nibble first, which is
 what the WS3b loader writes (GPTQ `[K/8, N]` transposed). `q in 0..15`, `z = 8` always (from the `sym` flag).
 
+## Layouts in/out (enforced before any launch)
+
+`sym_matmul` and `bf16_matmul` check metadata only (shape, dtype, stride, device; never tensor
+contents, no GPU sync) through `xpu/kernels/layout.py`, and raise `ValueError` before allocating or launching:
+
+| Operand | Contract | Why |
+|---|---|---|
+| `x` | 2-D bf16, `stride(1) == 1`, any `stride(0)` (passed as `ldx`), M >= 1 | rows may be views of a wider buffer |
+| `weight` (SYM) | 2-D int32 `(N, K/8)`, N >= 1, **contiguous** | the kernel reads row n at word `n*K/8` |
+| `scales` | fp16 or bf16 `(N, K/gs)`, **contiguous**; gs in {64, 128}, `K % gs == 0` | scale of (n, g) at `n*K/gs + g` |
+| `xs` (`sym_matmul`) | contiguous fp32 `(M, K/64)` | row m at `m*K/64` |
+| `weight` (bf16) | 2-D bf16 `(N, K)`, N >= 1, contiguous, `K % 64 == 0` | row n at `n*K` |
+| devices | every operand on `x.device` | one launch device |
+
+The output (and the split-K partials) are allocated by the wrapper: contiguous `(M, N)` (`(SK, M, N)` fp32).
+A row slice `weight[a:b]`, `scales[a:b]` of a contiguous parent is contiguous, so the parent-head row views
+(`qmm_fast.rows` / `_xpu_rows`, DFlash2 heads) pass and keep the parent's plan through `config=` / `sk=`. A column
+slice, a transposed weight or a padded row stride is refused rather than copied (no copy on the decode path); the
+loader writes the N-major layout once. Tests: `tests/xpu/test_kernel_layouts.py` (host: every refusal raises before a
+patched launcher; supported views reach it) and `tests/cuda/test_xpu_layouts.py` (B70, `xpu_kernel("qmm")`: strided
+rows, every-other-row views, one strided row alone and parent-head row slices at spans (0,1), (63,65), (17,300),
+(999,1000) give the contiguous call's bits, fp32 and bf16, g64 and g128, M in {1, 16, 17, 129}).
+
 ## Arithmetic contract (SYM)
 
 Per output element `(m, n)`, with `G = K / GS` groups, `SK` K slices of `PER = G / SK` consecutive groups:

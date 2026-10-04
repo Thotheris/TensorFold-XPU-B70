@@ -15,7 +15,8 @@ os.environ.setdefault("TF_GLM_MTP", "1")
 XPU_MODULES = {"test_qwen27_glue.py", "test_prefill_attention.py", "test_qwen27_qmm.py", "test_qmm.py",
                "test_xpu_native_hello.py", "test_gdn.py", "test_attention.py",
                "test_qwen27_draft_attention.py", "test_qwen27_dflash2_kernels.py", "test_xpu_prompt_gemm.py",
-               "test_xpu_experts.py", "test_xpu_mamba_scan.py", "test_nemotron_kernels.py", "test_xpu_launch.py"}
+               "test_xpu_experts.py", "test_xpu_mamba_scan.py", "test_nemotron_kernels.py", "test_xpu_launch.py",
+               "test_xpu_layouts.py"}
 
 if not device_available():
     collect_ignore_glob = ["test_*.py"]
