@@ -11,7 +11,7 @@ __all__ = ["run_benchmark"]
 
 
 class _Capture:
-    """A wrapper records the compiled handle while preserving the production launch."""
+    """A wrapper records the compiled handle of each launch it forwards: ``kernel[grid](...)`` or a Launcher call."""
 
     def __init__(self, kernel):
         self.kernel = kernel
@@ -22,6 +22,10 @@ class _Capture:
             self.compiled = self.kernel[grid](*args, **kwargs)
             return self.compiled
         return launch
+
+    def __call__(self, grid, *args, **options):
+        self.compiled = self.kernel(grid, *args, **options)
+        return self.compiled
 
 
 def run_benchmark(name: str, out_dir: Path) -> dict:

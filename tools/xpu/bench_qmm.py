@@ -26,6 +26,20 @@ ROWS = (1, 2, 4, 8, 12, 16)  # serial decode and realistic verify windows
 HEADLINE = ("qwen-down", 1)
 CACHE_BYTES = 128 << 20      # weights are cycled over copies of at least this size: the last-level cache is 24 MB
 BATCH = 20                   # launches queued back to back per timing sample, as a decode step queues them
+COUNTERS = {
+    "source": "the compiled kernel the main launch of the timed calls returned (cached direct launches included)",
+    "n_regs": "GRF budget per thread, not measured register usage; n_regs_source: driver = Level Zero module load, "
+              "zebin = .ze_info grf_count, grf_mode = implied by the grf_mode build option (inferred)",
+    "n_spills": "spill bytes the Level Zero module load reported for the main kernel",
+    "threads_per_warp": "sub-group size in the main kernel's compiled metadata",
+    "dpas": "the DPAS layout marker appears in the main kernel's compiled IR",
+}
+GAPS = {   # why a counter stays null when the compiled kernel was captured
+    "n_regs": "no driver, zebin or grf_mode GRF value on the compiled kernel",
+    "n_spills": "the compiled kernel carries no n_spills (the module load did not report it)",
+    "threads_per_warp": "the compiled kernel and its metadata carry neither threads_per_warp nor warp_size",
+    "dpas": "the compiled kernel carries no IR text to search for the DPAS layout",
+}
 
 
 def _queued(torch, fn, spin, calls: int = BATCH) -> tuple[float, float]:
@@ -57,6 +71,19 @@ def _make_weights(torch, n: int, k: int, gs: int):
     words = torch.randint(-(2**31), 2**31 - 1, (n, k // 8), generator=gen, device="xpu", dtype=torch.int64)
     scales = (torch.rand((n, k // gs), generator=gen, device="xpu") * 0.02 + 0.001).half()
     return words.to(torch.int32), scales
+
+
+def _launched(module, launcher: str, call):
+    """The compiled kernel the named Launcher returned for ``call()``'s main launch, from the JIT or its cache."""
+    capture = _Capture(getattr(module, launcher))
+    setattr(module, launcher, capture)
+    try:
+        call()
+    finally:
+        setattr(module, launcher, capture.kernel)
+    if capture.compiled is None:
+        raise RuntimeError(f"{launcher} returned no compiled kernel to read counters from")
+    return capture.compiled
 
 
 def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path, spin) -> dict:
@@ -95,24 +122,20 @@ def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path, spin)
         raise RuntimeError(f"qmm {case} M={m} failed invariance (repeats={repeats_equal}, rows={rows_equal}, "
                            f"copies={copies_equal})")
 
-    module, name = (bf16_module, "_gemv") if gs == 0 else (lane_module, "_qmm_sym")
-    original = getattr(module, name)
-    capture = _Capture(original)
-    setattr(module, name, capture)
+    module, name = (bf16_module, "_LAUNCH_GEMV") if gs == 0 else (lane_module, "_LAUNCH_QMM")
     counter = [0]
 
     def timed():
         counter[0] += 1
         return launch(copies[counter[0] % len(copies)])
 
-    try:
-        timed()
-        torch.xpu.synchronize()
-        nbytes = nbytes_weights + x.numel() * 2 + m * n * 2
-        metrics = bench(fn=timed, nbytes=nbytes, flops=2.0 * m * n * k, name=f"qmm-{case}-m{m}",
-                        out_dir=out_dir / "kernels", triton_kernel=capture.compiled, bitwise_ok=equal, batch=BATCH)
-    finally:
-        setattr(module, name, original)
+    compiled = _launched(module, name, timed)
+    torch.xpu.synchronize()
+    nbytes = nbytes_weights + x.numel() * 2 + m * n * 2
+    metrics = bench(fn=timed, nbytes=nbytes, flops=2.0 * m * n * k, name=f"qmm-{case}-m{m}",
+                    out_dir=out_dir / "kernels", triton_kernel=compiled, bitwise_ok=equal, batch=BATCH)
+    if _launched(module, name, timed) is not compiled:
+        raise RuntimeError(f"qmm {case} M={m}: the timed calls launched a different compiled kernel")
     warm = bench(fn=lambda: launch(weights), nbytes=nbytes, flops=2.0 * m * n * k, name=f"qmm-{case}-m{m}-warm",
                  out_dir=out_dir / "scratch", bitwise_ok=equal, batch=BATCH)
     host_us, device_us = _queued(torch, timed, spin)
@@ -123,6 +146,7 @@ def _one(torch, case: str, n: int, k: int, gs: int, m: int, out_dir: Path, spin)
                    us_per_row=metrics["median_us"] / m, warm_median_us=warm["median_us"],
                    host_submit_us=host_us, device_us=device_us, device_gbps=nbytes / 1e3 / device_us,
                    device_pct_peak_gbps=100 * nbytes / 1e3 / device_us / 608.0,
+                   counter_gaps={key: GAPS[key] for key in GAPS if metrics[key] is None},
                    repeats_checked=20, rows_checked=m, weight_copies=len(copies), status="pass",
                    bytes_model="weights + scales + x + out, one pass; weights cycled over copies larger than the LLC",
                    timing=(f"median_us: {BATCH} calls back to back per sample, per-call mean, weights cold (cycled); "
@@ -154,8 +178,9 @@ def run(out_dir: Path) -> dict:
         "cases": [{key: r[key] for key in ("name", "median_us", "warm_median_us", "us_per_row", "gbps",
                                             "pct_peak_gbps", "host_submit_us", "device_us", "device_pct_peak_gbps",
                                             "launches_per_call", "n_spills", "n_regs", "n_regs_source",
-                                            "threads_per_warp", "dpas", "bitwise_ok")}
+                                            "threads_per_warp", "dpas", "counter_gaps", "bitwise_ok")}
                   for _, _, r in results],
+        "counters": COUNTERS,
         "host_breakdown": _host_breakdown(torch),
         "bitwise_ok": all(r["bitwise_ok"] for _, _, r in results),
     }

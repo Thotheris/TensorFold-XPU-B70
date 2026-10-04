@@ -164,6 +164,10 @@ Removing launches (no separate reduce, shared group sums, cached launches or gra
   against 2.3e-7 for `dot(x, q - 8) * s`; both are about 1000x below the bf16 output rounding (2^-9). The contract
   stays as is (CUDA's and the native plan's).
 - Launch overhead, part fixed: `xpu/kernels/launch.py::Launcher` calls the compiled kernel's `run` after the first
-  JIT dispatch (the key covers dtypes, 16-byte alignment and int value / divisibility / width). A split-K call's host
+  JIT dispatch (the key covers the function, dtypes, 16-byte alignment and int value / divisibility / i32-i64-u64
+  width). An entry holds its function, so a replaced or temporary function never reuses another's compiled kernel;
+  cached launches pass this call's grid and args on the device's current stream (`tests/xpu/test_launch.py`,
+  `tests/cuda/test_xpu_launch.py`) and return the compiled kernel, which `kernels:qmm` reads lanes, spills and DPAS
+  from on every case (`counter_gaps` names any counter the driver did not report). A split-K call's host
   time went from about 97 us to 71 us (dev). The rest is the driver's launch (~16 us each), two allocations and the
   wrapper's checks; fewer launches (fused reduce, graphs) is WS6.
